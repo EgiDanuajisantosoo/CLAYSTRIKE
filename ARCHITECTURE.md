@@ -15,7 +15,7 @@ All runtime systems, services, controllers, and assets must adhere to this folde
 | `ReplicatedStorage` | `Assets` | `Folder` | Visual, audio, and UI assets replicated to clients |
 | `ServerStorage` | `EnemyTemplates` | `Folder` | Authoritative enemy models, spawners, and template instances (hidden from client) |
 | `ServerScriptService` | `Services` | `Folder` | Authoritative server logic, damage validation, match progression, and session management |
-| `StarterPlayer.StarterPlayerScripts` | `Controllers` | `Folder` | Client presentation, camera manipulation, input collection, and cosmetic effects |
+| `StarterPlayer.StarterPlayerScripts` | `Controllers` | `Folder` | Template container for client scripts replicated into `PlayerScripts.Controllers` on join |
 | `Workspace` | `CombatArena` | `Folder` | Static play boundary bounds, camera anchors, and play plane markers |
 | `Workspace` | `Projectiles` | `Folder` | Active projectile visual models in the workspace |
 | `Workspace` | `Enemies` | `Folder` | Active spawned enemy models in the workspace |
@@ -43,7 +43,15 @@ In accordance with Rojo and Roblox conventions:
 
 ---
 
-## 3. UI and Studio Instance Preservation
+## 3. Explicit Baseline Validation (`Architecture.luau`)
+
+To ensure clean server/client boundaries without cross-contamination:
+- `Architecture.ValidateServerBaseline()`: Validates all shared replicated folders, authoritative server storage (`Services`, `EnemyTemplates`), and the `StarterPlayer.StarterPlayerScripts.Controllers` template container.
+- `Architecture.ValidateClientBaseline()`: Validates replicated shared folders and verifies the actual running client container (`LocalPlayer.PlayerScripts.Controllers`).
+
+---
+
+## 4. UI and Studio Instance Preservation
 
 - `StarterGui`, `Lighting`, `Workspace.Baseplate`, `Workspace.Terrain`, and custom Studio-placed models remain managed solely within Roblox Studio.
 - Rojo only manages the explicitly designated subfolders (`Services`, `Controllers`, `Shared`, `Remotes`, `Assets`, `EnemyTemplates`, and workspace runtime folders).
