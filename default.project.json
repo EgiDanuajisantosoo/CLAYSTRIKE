@@ -1,0 +1,45 @@
+{
+  "name": "CLAYSTRIKE",
+  "tree": {
+    "$className": "DataModel",
+    "ServerScriptService": {
+      "Services": {
+        "$path": "src/server"
+      }
+    },
+    "ReplicatedStorage": {
+      "Shared": {
+        "$path": "src/shared"
+      },
+      "Remotes": {
+        "$className": "Folder"
+      },
+      "Assets": {
+        "$className": "Folder"
+      }
+    },
+    "ServerStorage": {
+      "EnemyTemplates": {
+        "$className": "Folder"
+      }
+    },
+    "StarterPlayer": {
+      "StarterPlayerScripts": {
+        "Controllers": {
+          "$path": "src/client"
+        }
+      }
+    },
+    "Workspace": {
+      "CombatArena": {
+        "$className": "Folder"
+      },
+      "Projectiles": {
+        "$className": "Folder"
+      },
+      "Enemies": {
+        "$className": "Folder"
+      }
+    }
+  }
+}
