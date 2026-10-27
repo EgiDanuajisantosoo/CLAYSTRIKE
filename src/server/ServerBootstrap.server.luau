@@ -26,6 +26,7 @@ local WeaponService = require(script.Parent:WaitForChild("WeaponService"))
 local WeaponServiceTests = require(script.Parent:WaitForChild("WeaponServiceTests"))
 local ProjectileService = require(script.Parent:WaitForChild("ProjectileService"))
 local ProjectileSimulationTests = require(script.Parent:WaitForChild("ProjectileSimulationTests"))
+local EnemyTests = require(SharedFolder:WaitForChild("EnemyTests"))
 
 -- 1. Validate baseline structure
 local baselineSuccess, missing = Architecture.ValidateServerBaseline()
@@ -92,7 +93,18 @@ if weaponSummary.failed > 0 then
 end
 print(string.format("[CLAYSTRIKE - WeaponTests] %d/%d weapon configuration tests PASSED.", weaponSummary.passed, weaponSummary.total))
 
--- 7. Execute weapon service combat cadence unit tests
+-- 7. Execute enemy data definition schema unit tests
+local enemySummary = EnemyTests.RunTests()
+if enemySummary.failed > 0 then
+	error(string.format(
+		"[CLAYSTRIKE - ServerBootstrap] CRITICAL: %d/%d enemy definition schema tests FAILED. Halting server initialization.",
+		enemySummary.failed,
+		enemySummary.total
+	))
+end
+print(string.format("[CLAYSTRIKE - EnemyTests] %d/%d enemy definition schema tests PASSED.", enemySummary.passed, enemySummary.total))
+
+-- 8. Execute weapon service combat cadence unit tests
 local weaponServiceSummary = WeaponServiceTests.RunTests(WeaponService)
 if weaponServiceSummary.failed > 0 then
 	error(string.format(
