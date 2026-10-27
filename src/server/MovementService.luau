@@ -28,6 +28,16 @@ local playerVelocities: { [number]: Vector2 } = {}
 local heartbeatConnection: RBXScriptConnection? = nil
 local isInitialized = false
 
+-- Test clock override for deterministic simulation
+local customClockFn: (() -> number)? = nil
+
+local function getTime(): number
+	if customClockFn then
+		return customClockFn()
+	end
+	return os.clock()
+end
+
 -- Helper to check finite numbers
 local function isFiniteNumber(val: any): boolean
 	return typeof(val) == "number" and val == val and math.abs(val) ~= math.huge
@@ -70,7 +80,7 @@ function MovementService.StepPlayerMovement(userId: number, dt: number)
 	-- Check input timeout: decay to zero if no input received within timeout window
 	local targetDir = Vector2.zero
 	if inputRecord then
-		if (os.clock() - inputRecord.lastReceived) <= GameConfig.Movement.InputTimeout then
+		if (getTime() - inputRecord.lastReceived) <= GameConfig.Movement.InputTimeout then
 			targetDir = inputRecord.direction
 		else
 			inputRecord.direction = Vector2.zero
@@ -161,7 +171,7 @@ function MovementService.HandleMoveIntent(player: any, moveDirection: any)
 	-- 5. Record input with current server timestamp
 	playerInputs[userId] = {
 		direction = normalizedDir,
-		lastReceived = os.clock(),
+		lastReceived = getTime(),
 	}
 end
 
@@ -192,6 +202,13 @@ function MovementService.CleanupPlayer(playerOrUserId: any)
 end
 
 --[[
+	Returns true if MovementService is currently initialized.
+]]
+function MovementService.IsInitialized(): boolean
+	return isInitialized
+end
+
+--[[
 	Initializes MovementService.
 	Connects to RunService.Heartbeat and Players.PlayerRemoving. Idempotent.
 ]]
@@ -212,11 +229,47 @@ function MovementService.Initialize()
 end
 
 --[[
-	Test helper to reset all movement states and disconnect loop if needed.
+	Test helper to reset all movement states and custom clock.
 ]]
 function MovementService._Reset()
 	playerInputs = {}
 	playerVelocities = {}
+	customClockFn = nil
+end
+
+--[[
+	Test helper to inject custom clock function for deterministic time testing.
+]]
+function MovementService._SetClock(fn: (() -> number)?)
+	customClockFn = fn
+end
+
+--[[
+	Test helper to manually override lastReceived timestamp for a player.
+]]
+function MovementService._SetLastReceived(userId: number, timestamp: number)
+	if playerInputs[userId] then
+		playerInputs[userId].lastReceived = timestamp
+	else
+		playerInputs[userId] = {
+			direction = Vector2.zero,
+			lastReceived = timestamp,
+		}
+	end
+end
+
+--[[
+	Test helper to disconnect heartbeat and restore uninitialized state (for isolated tests).
+]]
+function MovementService._Teardown()
+	if heartbeatConnection then
+		heartbeatConnection:Disconnect()
+		heartbeatConnection = nil
+	end
+	isInitialized = false
+	playerInputs = {}
+	playerVelocities = {}
+	customClockFn = nil
 end
 
 return MovementService

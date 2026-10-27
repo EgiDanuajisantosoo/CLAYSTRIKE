@@ -112,27 +112,43 @@ function MovementTests.RunTests(): { total: number, passed: number, failed: numb
 	assertTest("Velocity pushing into -X edge is neutralized to 0", velAtMinBoundary.X == 0)
 	assertTest("Velocity pushing into -Y edge is neutralized to 0", velAtMinBoundary.Y == 0)
 
-	-- 6. Input timeout and deceleration
-	-- Center the plane and accelerate right
+	-- 6. Input timeout and deceleration (WITHOUT sending zero input packet)
 	plane1:PivotTo(CFrame.new(0, 0, 0))
 	MovementService._Reset()
-	MovementService.HandleMoveIntent(testUser1, Vector2.new(1, 0))
-	-- Accelerate for 0.5s to reach max speed (50 studs/s)
-	MovementService.StepPlayerMovement(testUser1.UserId, 0.5)
-	local velBeforeDecel = MovementService.GetVelocity(testUser1)
-	assertTest("Aircraft reached MaxSpeed (50 studs/s)", math.abs(velBeforeDecel.X - 50) < 0.01)
 
-	-- Simulate input stopping (send 0 direction)
-	MovementService.HandleMoveIntent(testUser1, Vector2.zero)
+	local simulatedTime = 100.0
+	MovementService._SetClock(function()
+		return simulatedTime
+	end)
+
+	-- Simulate active input stream (+X) for 0.5s to reach max speed (50 studs/s)
+	for _ = 1, 5 do
+		MovementService.HandleMoveIntent(testUser1, Vector2.new(1, 0))
+		simulatedTime += 0.1
+		MovementService.StepPlayerMovement(testUser1.UserId, 0.1)
+	end
+	local velBeforeTimeout = MovementService.GetVelocity(testUser1)
+	assertTest("Aircraft reached MaxSpeed (50 studs/s) under active input", math.abs(velBeforeTimeout.X - 50) < 0.01)
+
+	-- Advance simulated clock past InputTimeout (0.25s) by 0.30s without sending any packet
+	simulatedTime += 0.30
+
+	-- Step: Must detect input timeout (> 0.25s without packet), decay target to zero, and decelerate
 	MovementService.StepPlayerMovement(testUser1.UserId, 0.1)
-	local velDuringDecel = MovementService.GetVelocity(testUser1)
+	local velAfterTimeout = MovementService.GetVelocity(testUser1)
 	local expectedDecelX = 50 - (GameConfig.Movement.Deceleration * 0.1) -- 50 - 16 = 34
-	assertTest("Aircraft decelerates when input stops", math.abs(velDuringDecel.X - expectedDecelX) < 0.01)
+	assertTest("Input timeout detected without zero input: target decays to 0 and decelerates", math.abs(velAfterTimeout.X - expectedDecelX) < 0.01)
 
-	-- Step until completely stopped
-	MovementService.StepPlayerMovement(testUser1.UserId, 0.5)
-	local velStopped = MovementService.GetVelocity(testUser1)
-	assertTest("Aircraft comes to a complete stop (0 studs/s)", velStopped.Magnitude < 0.001)
+	-- Step until completely stopped purely via timeout deceleration
+	while velAfterTimeout.Magnitude > 0 do
+		simulatedTime += 0.1
+		MovementService.StepPlayerMovement(testUser1.UserId, 0.1)
+		velAfterTimeout = MovementService.GetVelocity(testUser1)
+	end
+	assertTest("Aircraft comes to complete stop (0 studs/s) purely via input timeout", velAfterTimeout.Magnitude < 0.001)
+
+	-- Restore default clock
+	MovementService._SetClock(nil)
 
 	-- 7. Malformed and non-finite input protection
 	MovementService.HandleMoveIntent(testUser1, Vector2.new(0/0, 0)) -- NaN
@@ -178,10 +194,25 @@ function MovementTests.RunTests(): { total: number, passed: number, failed: numb
 	AircraftService.DespawnPlaneForPlayer(testUser2.UserId)
 	MovementService.CleanupPlayer(testUser2.UserId)
 
-	-- 11. Idempotent Initialize
-	MovementService.Initialize()
-	MovementService.Initialize()
-	assertTest("MovementService.Initialize() is idempotent without errors", true)
+	-- 11. Idempotent Initialize on isolated instance (zero production side-effects)
+	local ServerScriptService = game:GetService("ServerScriptService")
+	local servicesFolder = ServerScriptService:WaitForChild("Services")
+	local movementScript = servicesFolder:WaitForChild("MovementService")
+	local isolatedModule = movementScript:Clone()
+	isolatedModule.Parent = servicesFolder
+	local isolatedService = require(isolatedModule)
+
+	assertTest("Isolated service starts uninitialized", isolatedService.IsInitialized() == false)
+	isolatedService.Initialize()
+	assertTest("Isolated service initializes successfully", isolatedService.IsInitialized() == true)
+	isolatedService.Initialize() -- duplicate call to test idempotency
+	assertTest("Duplicate Initialize() is safely idempotent", isolatedService.IsInitialized() == true)
+
+	isolatedService._Teardown()
+	isolatedModule:Destroy()
+
+	-- Assert production MovementService was NOT initialized during test run
+	assertTest("Production MovementService remains uninitialized during test phase", MovementService.IsInitialized() == false)
 
 	return {
 		total = passedCount + failedCount,
