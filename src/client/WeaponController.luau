@@ -36,6 +36,7 @@ local connections: { RBXScriptConnection } = {}
 local isInitialized = false
 local isEnabled = true
 local isFireHeld = false
+local isWindowFocused = true
 local activeWeaponId = WeaponConfig.DEFAULT_WEAPON_ID
 
 local lastLocalFireTime = 0
@@ -116,7 +117,7 @@ local function onHeartbeat()
 	end
 
 	-- Focus checks
-	local focused = if mockWindowFocus ~= nil then mockWindowFocus else UserInputService:IsWindowFocused()
+	local focused = if mockWindowFocus ~= nil then mockWindowFocus else isWindowFocused
 	if not focused then
 		isFireHeld = false
 		return
@@ -197,17 +198,24 @@ function WeaponController.Initialize()
 
 	-- 4. Window focus loss safety (Alt-Tab protection)
 	local focusLostConn = UserInputService.WindowFocusReleased:Connect(function()
+		isWindowFocused = false
 		isFireHeld = false
 	end)
 	table.insert(connections, focusLostConn)
 
-	-- 5. UI TextBox focus safety (typing into chat)
+	-- 5. Window focus restored
+	local focusGainedConn = UserInputService.WindowFocused:Connect(function()
+		isWindowFocused = true
+	end)
+	table.insert(connections, focusGainedConn)
+
+	-- 6. UI TextBox focus safety (typing into chat)
 	local tbFocusConn = UserInputService.TextBoxFocused:Connect(function()
 		isFireHeld = false
 	end)
 	table.insert(connections, tbFocusConn)
 
-	-- 6. Server shot replication listener for cosmetic muzzle flashes
+	-- 7. Server shot replication listener for cosmetic muzzle flashes
 	local remoteConn = fireWeaponRemote.OnClientEvent:Connect(function(data: any)
 		if type(data) == "table" and data.origin then
 			serverConfirmCount += 1
@@ -268,6 +276,16 @@ function WeaponController.GetActiveWeapon(): string
 end
 
 --[[
+	Returns true if the window currently has focus.
+]]
+function WeaponController.IsWindowFocused(): boolean
+	if mockWindowFocus ~= nil then
+		return mockWindowFocus
+	end
+	return isWindowFocused
+end
+
+--[[
 	Returns the count of local fire requests attempted.
 ]]
 function WeaponController.GetLocalShotCount(): number
@@ -288,6 +306,21 @@ function WeaponController.StepFiring(virtualTime: number)
 	if not isEnabled then
 		return
 	end
+
+	local focused = if mockWindowFocus ~= nil then mockWindowFocus else isWindowFocused
+	if not focused then
+		isFireHeld = false
+		return
+	end
+
+	local typing = if mockTextBoxFocus ~= nil
+		then mockTextBoxFocus
+		else (UserInputService:GetFocusedTextBox() ~= nil)
+	if typing then
+		isFireHeld = false
+		return
+	end
+
 	local firing = if mockFireHeld ~= nil then mockFireHeld else isFireHeld
 	if firing then
 		attemptFire(virtualTime)
@@ -304,10 +337,13 @@ end
 --[[
 	Test helper to simulate window focus.
 ]]
-function WeaponController._SimulateWindowFocus(focused: boolean)
+function WeaponController._SimulateWindowFocus(focused: boolean?)
 	mockWindowFocus = focused
-	if not focused then
-		isFireHeld = false
+	if focused ~= nil then
+		isWindowFocused = focused
+		if not focused then
+			isFireHeld = false
+		end
 	end
 end
 
@@ -341,6 +377,7 @@ function WeaponController._Teardown()
 	isInitialized = false
 	isEnabled = true
 	isFireHeld = false
+	isWindowFocused = true
 	mockFireHeld = nil
 	mockWindowFocus = nil
 	mockTextBoxFocus = nil
