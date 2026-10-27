@@ -17,6 +17,7 @@ All runtime systems, services, controllers, and assets must adhere to this folde
 | `ServerScriptService` | `Services` | `Folder` | Authoritative server logic, damage validation, match progression, and session management |
 | `StarterPlayer.StarterPlayerScripts` | `Controllers` | `Folder` | Template container for client scripts replicated into `PlayerScripts.Controllers` on join |
 | `Workspace` | `CombatArena` | `Folder` | Static play boundary bounds, camera anchors, and play plane markers |
+| `Workspace` | `ActivePlanes` | `Folder` | Active player aircraft models in the workspace |
 | `Workspace` | `Projectiles` | `Folder` | Active projectile visual models in the workspace |
 | `Workspace` | `Enemies` | `Folder` | Active spawned enemy models in the workspace |
 

@@ -15,6 +15,8 @@ local SharedFolder = ReplicatedStorage:WaitForChild("Shared")
 local Architecture = require(SharedFolder:WaitForChild("Architecture"))
 local ContractTests = require(SharedFolder:WaitForChild("ContractTests"))
 local RemoteManager = require(script.Parent:WaitForChild("RemoteManager"))
+local AircraftTests = require(script.Parent:WaitForChild("AircraftTests"))
+local AircraftService = require(script.Parent:WaitForChild("AircraftService"))
 
 -- 1. Validate baseline structure
 local baselineSuccess, missing = Architecture.ValidateServerBaseline()
@@ -37,5 +39,19 @@ if testSummary.failed > 0 then
 end
 print(string.format("[CLAYSTRIKE - ContractTests] %d/%d isolated contract validation tests PASSED.", testSummary.passed, testSummary.total))
 
--- 3. Initialize authoritative network remotes & security boundaries
+-- 3. Execute aircraft model factory and lifecycle unit tests
+local aircraftSummary = AircraftTests.RunTests()
+if aircraftSummary.failed > 0 then
+	error(string.format(
+		"[CLAYSTRIKE - ServerBootstrap] CRITICAL: %d/%d aircraft factory tests FAILED. Halting server initialization.",
+		aircraftSummary.failed,
+		aircraftSummary.total
+	))
+end
+print(string.format("[CLAYSTRIKE - AircraftTests] %d/%d aircraft factory tests PASSED.", aircraftSummary.passed, aircraftSummary.total))
+
+-- 4. Initialize authoritative network remotes & security boundaries
 RemoteManager.Initialize()
+
+-- 5. Initialize authoritative aircraft lifecycle service
+AircraftService.Initialize()

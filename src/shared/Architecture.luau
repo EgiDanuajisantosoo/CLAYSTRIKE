@@ -26,6 +26,7 @@ Architecture.SharedFolders = {
 	Remotes = { name = "Remotes", parent = ReplicatedStorage },
 	Assets = { name = "Assets", parent = ReplicatedStorage },
 	CombatArena = { name = "CombatArena", parent = Workspace },
+	ActivePlanes = { name = "ActivePlanes", parent = Workspace },
 	Projectiles = { name = "Projectiles", parent = Workspace },
 	Enemies = { name = "Enemies", parent = Workspace },
 }
