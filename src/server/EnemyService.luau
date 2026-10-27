@@ -39,6 +39,9 @@ export type ActiveEnemy = {
 	definition: EnemyConfig.EnemyDefinition,
 }
 
+export type DefeatCallback = (record: ActiveEnemy, attackerPlayer: Player?) -> ()
+export type DamageCallback = (record: ActiveEnemy, damage: number, attackerPlayer: Player?) -> ()
+
 local EnemyService = {}
 
 local activeEnemies: { [string]: ActiveEnemy } = {}
@@ -46,6 +49,9 @@ local isInitialized = false
 local spawnCounter = 0
 local activeFolder: Folder? = nil
 local heartbeatConnection: RBXScriptConnection? = nil
+local defeatCallbacks: { DefeatCallback } = {}
+local damageCallbacks: { DamageCallback } = {}
+local hitHookCleanup: (() -> ())? = nil
 
 -- Helper to retrieve or create the authoritative ActiveEnemies container in Workspace
 local function getActiveEnemiesFolder(): Folder
@@ -246,6 +252,102 @@ function EnemyService.StepEnemySimulation(dt: number)
 end
 
 --[[
+	Authoritatively applies damage to an active enemy.
+	Enforces non-negative health clamping, one-time defeat transition, and idempotent callbacks.
+	Returns (hitValid: boolean, wasDefeated: boolean).
+]]
+function EnemyService.ApplyDamage(enemyId: string, damage: number, attackerPlayer: Player?): (boolean, boolean)
+	if damage <= 0 then
+		return false, false
+	end
+
+	local record = activeEnemies[enemyId]
+	if not record or not record.isAlive then
+		return false, false
+	end
+
+	local newHealth = math.max(0, record.currentHealth - damage)
+	record.currentHealth = newHealth
+
+	if record.model and record.model.Parent then
+		record.model:SetAttribute("CurrentHealth", newHealth)
+	end
+
+	if newHealth == 0 then
+		-- Atomic one-time defeat transition
+		record.isAlive = false
+		if record.model and record.model.Parent then
+			record.model:SetAttribute("IsAlive", false)
+		end
+
+		-- Notify defeat observers
+		for _, callback in ipairs(defeatCallbacks) do
+			task.spawn(callback, record, attackerPlayer)
+		end
+
+		-- Despawn enemy model and remove from active list
+		EnemyService.DespawnEnemy(enemyId)
+
+		return true, true
+	else
+		-- Notify damage observers
+		for _, callback in ipairs(damageCallbacks) do
+			task.spawn(callback, record, damage, attackerPlayer)
+		end
+
+		return true, false
+	end
+end
+
+--[[
+	Registers a listener for enemy defeat events. Returns an unsubscribe function.
+]]
+function EnemyService.OnEnemyDefeated(callback: DefeatCallback): () -> ()
+	table.insert(defeatCallbacks, callback)
+	return function()
+		local idx = table.find(defeatCallbacks, callback)
+		if idx then
+			table.remove(defeatCallbacks, idx)
+		end
+	end
+end
+
+--[[
+	Registers a listener for enemy damage events. Returns an unsubscribe function.
+]]
+function EnemyService.OnEnemyDamaged(callback: DamageCallback): () -> ()
+	table.insert(damageCallbacks, callback)
+	return function()
+		local idx = table.find(damageCallbacks, callback)
+		if idx then
+			table.remove(damageCallbacks, idx)
+		end
+	end
+end
+
+--[[
+	Binds ProjectileService hit events to EnemyService.ApplyDamage.
+	Resolves enemy model hierarchy and triggers authoritative damage.
+]]
+function EnemyService.HookProjectileHits(projectileService: any): (() -> ())?
+	if not projectileService or not projectileService.RegisterHitCallback then
+		return nil
+	end
+
+	return projectileService.RegisterHitCallback(function(hitResult: any)
+		if hitResult and hitResult.hitInstance and hitResult.hitInstance:IsA("BasePart") then
+			local model = hitResult.hitInstance:FindFirstAncestorOfClass("Model")
+			if model then
+				local enemyId = model:GetAttribute("EnemyId")
+				if enemyId and typeof(enemyId) == "string" then
+					EnemyService.ApplyDamage(enemyId, hitResult.damage, hitResult.attackerPlayer)
+				end
+			end
+		end
+	end)
+end
+
+--[[
 	Initializes EnemyService. Idempotent.
 ]]
 function EnemyService.Initialize()
@@ -262,7 +364,13 @@ function EnemyService.Initialize()
 		end)
 	end
 
-	print("[EnemyService] Authoritative enemy lifecycle and simulation service initialized.")
+	local ProjectileServiceModule = script.Parent:FindFirstChild("ProjectileService")
+	if ProjectileServiceModule and hitHookCleanup == nil then
+		local pService = require(ProjectileServiceModule)
+		hitHookCleanup = EnemyService.HookProjectileHits(pService)
+	end
+
+	print("[EnemyService] Authoritative enemy lifecycle, health, and simulation service initialized.")
 end
 
 --[[
@@ -280,6 +388,14 @@ function EnemyService._Teardown()
 		heartbeatConnection:Disconnect()
 		heartbeatConnection = nil
 	end
+
+	if hitHookCleanup then
+		hitHookCleanup()
+		hitHookCleanup = nil
+	end
+
+	defeatCallbacks = {}
+	damageCallbacks = {}
 
 	EnemyService.CleanupAll()
 	activeEnemies = {}
