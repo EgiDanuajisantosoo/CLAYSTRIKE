@@ -49,3 +49,6 @@ end
 local MovementController = require(script.Parent:WaitForChild("MovementController"))
 MovementController.Initialize()
 
+local CameraController = require(script.Parent:WaitForChild("CameraController"))
+CameraController.Initialize()
+

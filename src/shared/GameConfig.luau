@@ -26,6 +26,17 @@ export type RateLimitRule = {
 	burstAllowance: number,
 }
 
+export type CameraConfig = {
+	FieldOfView: number,
+	Distance: number,
+	FollowSmoothness: number,
+	LookAheadX: number,
+	MinX: number,
+	MaxX: number,
+	MinY: number,
+	MaxY: number,
+}
+
 local GameConfig = {}
 
 -- Contract versioning policy. Mismatches are rejected by the server validator.
@@ -48,6 +59,18 @@ GameConfig.Movement = {
 	InputTimeout = 0.25,
 	InputSamplingRate = 25,
 } :: MovementConfig
+
+-- 2.5D Side-scrolling camera parameters
+GameConfig.Camera = {
+	FieldOfView = 65,
+	Distance = 70,
+	FollowSmoothness = 8,
+	LookAheadX = 8,
+	MinX = -55,
+	MaxX = 55,
+	MinY = -25,
+	MaxY = 25,
+} :: CameraConfig
 
 -- Canonical session game states replicated to all clients
 GameConfig.GameStates = {
