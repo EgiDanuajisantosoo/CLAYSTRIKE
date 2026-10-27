@@ -19,6 +19,7 @@ local RemoteContracts = require(SharedFolder:WaitForChild("RemoteContracts"))
 local MovementController = {}
 
 local movePlaneRemote: RemoteEvent? = nil
+local heartbeatConnection: RBXScriptConnection? = nil
 local isInitialized = false
 
 local lastSentTime = 0
@@ -106,8 +107,15 @@ function MovementController.Initialize()
 	movePlaneRemote = remoteInstance :: RemoteEvent
 	isInitialized = true
 
-	RunService.Heartbeat:Connect(onHeartbeat)
+	heartbeatConnection = RunService.Heartbeat:Connect(onHeartbeat)
 	print("[MovementController] Movement controller initialized. Sampling input at 25 Hz.")
+end
+
+--[[
+	Returns true if MovementController is currently initialized.
+]]
+function MovementController.IsInitialized(): boolean
+	return isInitialized
 end
 
 --[[
@@ -115,6 +123,27 @@ end
 ]]
 function MovementController.GetCurrentInput(): Vector2
 	return MovementController.SampleRawInput()
+end
+
+--[[
+	Test helper to inspect heartbeat connection status.
+]]
+function MovementController._GetHeartbeatConnection(): RBXScriptConnection?
+	return heartbeatConnection
+end
+
+--[[
+	Cleans up MovementController: disconnects heartbeat loop, resets input state.
+]]
+function MovementController._Teardown()
+	if heartbeatConnection then
+		heartbeatConnection:Disconnect()
+		heartbeatConnection = nil
+	end
+	isInitialized = false
+	movePlaneRemote = nil
+	lastSentTime = 0
+	lastSentDirection = Vector2.zero
 end
 
 return MovementController
