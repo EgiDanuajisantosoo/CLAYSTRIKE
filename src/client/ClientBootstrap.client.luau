@@ -44,3 +44,8 @@ local gameStateRemote = verifyClientRemote(RemoteContracts.RemoteNames.GameState
 if movePlaneRemote and fireWeaponRemote and gameStateRemote then
 	print(string.format("[CLAYSTRIKE - ClientBootstrap] Network contracts verified (v%s). Ready for client controller binding.", GameConfig.CONTRACT_VERSION))
 end
+
+-- 3. Initialize client controllers
+local MovementController = require(script.Parent:WaitForChild("MovementController"))
+MovementController.Initialize()
+

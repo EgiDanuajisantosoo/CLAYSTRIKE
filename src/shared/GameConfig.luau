@@ -17,6 +17,8 @@ export type MovementConfig = {
 	MaxSpeed: number,
 	Acceleration: number,
 	Deceleration: number,
+	InputTimeout: number,
+	InputSamplingRate: number,
 }
 
 export type RateLimitRule = {
@@ -43,6 +45,8 @@ GameConfig.Movement = {
 	MaxSpeed = 50,
 	Acceleration = 120,
 	Deceleration = 160,
+	InputTimeout = 0.25,
+	InputSamplingRate = 25,
 } :: MovementConfig
 
 -- Canonical session game states replicated to all clients

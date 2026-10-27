@@ -17,6 +17,8 @@ local ContractTests = require(SharedFolder:WaitForChild("ContractTests"))
 local RemoteManager = require(script.Parent:WaitForChild("RemoteManager"))
 local AircraftTests = require(script.Parent:WaitForChild("AircraftTests"))
 local AircraftService = require(script.Parent:WaitForChild("AircraftService"))
+local MovementTests = require(script.Parent:WaitForChild("MovementTests"))
+local MovementService = require(script.Parent:WaitForChild("MovementService"))
 
 -- 1. Validate baseline structure
 local baselineSuccess, missing = Architecture.ValidateServerBaseline()
@@ -50,8 +52,23 @@ if aircraftSummary.failed > 0 then
 end
 print(string.format("[CLAYSTRIKE - AircraftTests] %d/%d aircraft factory tests PASSED.", aircraftSummary.passed, aircraftSummary.total))
 
--- 4. Initialize authoritative network remotes & security boundaries
+-- 4. Execute movement service unit tests
+local movementSummary = MovementTests.RunTests()
+if movementSummary.failed > 0 then
+	error(string.format(
+		"[CLAYSTRIKE - ServerBootstrap] CRITICAL: %d/%d movement tests FAILED. Halting server initialization.",
+		movementSummary.failed,
+		movementSummary.total
+	))
+end
+print(string.format("[CLAYSTRIKE - MovementTests] %d/%d movement tests PASSED.", movementSummary.passed, movementSummary.total))
+
+-- 5. Initialize authoritative network remotes & security boundaries
 RemoteManager.Initialize()
 
--- 5. Initialize authoritative aircraft lifecycle service
+-- 6. Initialize authoritative aircraft lifecycle service
 AircraftService.Initialize()
+
+-- 7. Initialize authoritative movement simulation service
+MovementService.Initialize()
+

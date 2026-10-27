@@ -15,6 +15,7 @@ local SharedFolder = ReplicatedStorage:WaitForChild("Shared")
 local GameConfig = require(SharedFolder:WaitForChild("GameConfig"))
 local RemoteContracts = require(SharedFolder:WaitForChild("RemoteContracts"))
 local RateLimiter = require(script.Parent:WaitForChild("RateLimiter"))
+local MovementService = require(script.Parent:WaitForChild("MovementService"))
 
 local RemoteManager = {}
 
@@ -75,7 +76,8 @@ function RemoteManager.Initialize()
 			return
 		end
 
-		-- Validated movement intent; server authoritatively computes position updates in CLAY-003/004.
+		-- 3. Route validated movement intent to MovementService
+		MovementService.HandleMoveIntent(player, payload.moveDirection)
 	end)
 
 	-- Handle incoming FireWeapon requests (Pure Intent)
