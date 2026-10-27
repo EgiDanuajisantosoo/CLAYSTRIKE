@@ -24,6 +24,14 @@ end
 
 local RemoteContracts = require(SharedFolder:WaitForChild("RemoteContracts"))
 
+local ProjectileService: any = nil
+local successProj, projMod = pcall(function()
+	return require(script.Parent:WaitForChild("ProjectileService", 2))
+end)
+if successProj then
+	ProjectileService = projMod
+end
+
 local WeaponService = {}
 
 type PlayerCombatState = {
@@ -93,8 +101,12 @@ local function spawnAuthoritativeProjectile(
 	aimDirection: Vector2,
 	weaponDef: WeaponConfig.WeaponDefinition
 ): BasePart
-	local container = getProjectilesFolder()
 	totalServerShots += 1
+	if ProjectileService then
+		return ProjectileService.SpawnProjectile(player.UserId, origin, aimDirection, weaponDef)
+	end
+
+	local container = getProjectilesFolder()
 
 	local proj = Instance.new("Part")
 	proj.Name = string.format("Proj_%d_%d", player.UserId, totalServerShots)
@@ -201,6 +213,10 @@ function WeaponService.Initialize()
 		playerStates[player.UserId] = nil
 	end)
 
+	if ProjectileService then
+		ProjectileService.Initialize()
+	end
+
 	print("[WeaponService] Authoritative combat weapon service initialized.")
 end
 
@@ -209,6 +225,13 @@ end
 ]]
 function WeaponService.IsInitialized(): boolean
 	return isInitialized
+end
+
+--[[
+	Injects or sets ProjectileService for testing.
+]]
+function WeaponService.SetProjectileService(service: any)
+	ProjectileService = service
 end
 
 --[[
@@ -237,6 +260,10 @@ function WeaponService._Teardown()
 	totalServerShots = 0
 	isInitialized = false
 	fireWeaponRemote = nil
+
+	if ProjectileService then
+		ProjectileService._Teardown()
+	end
 
 	local container = Workspace:FindFirstChild("Projectiles")
 	if container then

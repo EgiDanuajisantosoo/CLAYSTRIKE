@@ -24,6 +24,8 @@ local ArenaService = require(script.Parent:WaitForChild("ArenaService"))
 local WeaponTests = require(SharedFolder:WaitForChild("WeaponTests"))
 local WeaponService = require(script.Parent:WaitForChild("WeaponService"))
 local WeaponServiceTests = require(script.Parent:WaitForChild("WeaponServiceTests"))
+local ProjectileService = require(script.Parent:WaitForChild("ProjectileService"))
+local ProjectileSimulationTests = require(script.Parent:WaitForChild("ProjectileSimulationTests"))
 
 -- 1. Validate baseline structure
 local baselineSuccess, missing = Architecture.ValidateServerBaseline()
@@ -101,18 +103,32 @@ if weaponServiceSummary.failed > 0 then
 end
 print(string.format("[CLAYSTRIKE - WeaponServiceTests] %d/%d weapon service tests PASSED.", weaponServiceSummary.passed, weaponServiceSummary.total))
 
--- 8. Initialize authoritative arena boundaries
+-- 8. Execute server projectile simulation & anti-tunneling hit tests
+local projectileSummary = ProjectileSimulationTests.RunTests(ProjectileService)
+if projectileSummary.failed > 0 then
+	error(string.format(
+		"[CLAYSTRIKE - ServerBootstrap] CRITICAL: %d/%d projectile simulation tests FAILED. Halting server initialization.",
+		projectileSummary.failed,
+		projectileSummary.total
+	))
+end
+print(string.format("[CLAYSTRIKE - ProjectileSimulationTests] %d/%d projectile simulation tests PASSED.", projectileSummary.passed, projectileSummary.total))
+
+-- 9. Initialize authoritative arena boundaries
 ArenaService.Initialize()
 
--- 9. Initialize authoritative network remotes & security boundaries
+-- 10. Initialize authoritative network remotes & security boundaries
 RemoteManager.Initialize()
 
--- 10. Initialize authoritative aircraft lifecycle service
+-- 11. Initialize authoritative aircraft lifecycle service
 AircraftService.Initialize()
 
--- 11. Initialize authoritative movement simulation service
+-- 12. Initialize authoritative movement simulation service
 MovementService.Initialize()
 
--- 12. Initialize authoritative combat weapon service
+-- 13. Initialize authoritative projectile simulation service
+ProjectileService.Initialize()
+
+-- 14. Initialize authoritative combat weapon service
 WeaponService.Initialize()
 
