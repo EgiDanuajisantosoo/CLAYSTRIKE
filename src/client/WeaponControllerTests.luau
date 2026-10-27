@@ -75,11 +75,11 @@ function WeaponControllerTests.RunTests(weaponControllerModule: any?): {
 	-- 1. Initialize and verify connections
 	WeaponController.Initialize()
 	assertTest("WeaponController is initialized", WeaponController.IsInitialized() == true)
-	assertTest("WeaponController registers exactly 6 event connections", WeaponController._GetConnectionCount() == 6)
+	assertTest("WeaponController registers exactly 7 event connections", WeaponController._GetConnectionCount() == 7)
 
 	-- 2. Idempotent initialization
 	WeaponController.Initialize()
-	assertTest("Duplicate Initialize() preserves exactly 6 connections", WeaponController._GetConnectionCount() == 6)
+	assertTest("Duplicate Initialize() preserves exactly 7 connections", WeaponController._GetConnectionCount() == 7)
 
 	-- 3. Holding fire cadence test (virtual time steps)
 	WeaponController.StartFiring()
@@ -113,13 +113,18 @@ function WeaponControllerTests.RunTests(weaponControllerModule: any?): {
 	assertTest("No shot fired when fire is released (count remains 3)", WeaponController.GetLocalShotCount() == 3)
 
 	-- 5. Window focus loss stops firing loop
+	assertTest("Window focus initially reports true", WeaponController.IsWindowFocused() == true)
 	WeaponController.StartFiring()
 	WeaponController._SimulateWindowFocus(false)
 	assertTest("Simulated window focus loss resets IsFiring() to false", WeaponController.IsFiring() == false)
+	assertTest("IsWindowFocused() reports false when window focus lost", WeaponController.IsWindowFocused() == false)
 
 	WeaponController.StepFiring(101.0)
 	assertTest("No shot fired while window is unfocused (count remains 3)", WeaponController.GetLocalShotCount() == 3)
 	WeaponController._SimulateWindowFocus(true)
+	assertTest("IsWindowFocused() reports true after focus restored", WeaponController.IsWindowFocused() == true)
+	WeaponController._SimulateWindowFocus(nil)
+	assertTest("IsWindowFocused() falls back to isWindowFocused without error", WeaponController.IsWindowFocused() == true)
 
 	-- 6. UI TextBox focus stops firing loop
 	WeaponController.StartFiring()
