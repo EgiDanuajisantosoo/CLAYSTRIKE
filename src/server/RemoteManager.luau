@@ -4,8 +4,8 @@
 	Authoritative server network boundary.
 	Task: CLAY-002 (Define Remote Contracts & Shared Config)
 
-	Initializes RemoteEvents under ReplicatedStorage.Remotes, verifies instance ClassName,
-	and wires up per-player rate limiting and strict payload validation handlers.
+	Initializes RemoteEvents under ReplicatedStorage.Remotes upon explicit Initialize() call,
+	verifies instance ClassName, normalizes input vectors, and wires up rate limiting and schema validators.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -17,6 +17,12 @@ local RemoteContracts = require(SharedFolder:WaitForChild("RemoteContracts"))
 local RateLimiter = require(script.Parent:WaitForChild("RateLimiter"))
 
 local RemoteManager = {}
+
+-- References to RemoteEvents (populated purely inside Initialize())
+local movePlaneRemote: RemoteEvent? = nil
+local fireWeaponRemote: RemoteEvent? = nil
+local gameStateRemote: RemoteEvent? = nil
+local isInitialized = false
 
 -- Safely retrieves or creates a RemoteEvent with strict ClassName verification
 local function getOrCreateRemote(name: string): RemoteEvent
@@ -38,17 +44,24 @@ local function getOrCreateRemote(name: string): RemoteEvent
 	return remote
 end
 
-local movePlaneRemote = getOrCreateRemote(RemoteContracts.RemoteNames.MovePlane)
-local fireWeaponRemote = getOrCreateRemote(RemoteContracts.RemoteNames.FireWeapon)
-local gameStateRemote = getOrCreateRemote(RemoteContracts.RemoteNames.GameStateChanged)
-
 --[[
-	Initialize network listeners with rate limiting and schema validation
+	Initializes network listeners with rate limiting and schema validation.
+	Precondition: Baseline folders and contract unit tests must have already passed.
 ]]
 function RemoteManager.Initialize()
+	if isInitialized then
+		warn("[RemoteManager] Initialize() called more than once; skipping redundant initialization.")
+		return
+	end
+
+	-- Create or verify RemoteEvents strictly at runtime inside Initialize()
+	movePlaneRemote = getOrCreateRemote(RemoteContracts.RemoteNames.MovePlane)
+	fireWeaponRemote = getOrCreateRemote(RemoteContracts.RemoteNames.FireWeapon)
+	gameStateRemote = getOrCreateRemote(RemoteContracts.RemoteNames.GameStateChanged)
+
 	-- Handle incoming MovePlane requests (Pure Intent)
 	movePlaneRemote.OnServerEvent:Connect(function(player: Player, payload: any)
-		-- 1. Enforce per-player rate limit
+		-- 1. Enforce per-player rate limit (Fail-closed)
 		local rateOk, rateErr = RateLimiter.CheckRateLimit(player, RemoteContracts.RemoteNames.MovePlane)
 		if not rateOk then
 			warn(string.format("[Security] Player %s rate limited: %s", player.Name, tostring(rateErr)))
@@ -67,7 +80,7 @@ function RemoteManager.Initialize()
 
 	-- Handle incoming FireWeapon requests (Pure Intent)
 	fireWeaponRemote.OnServerEvent:Connect(function(player: Player, payload: any)
-		-- 1. Enforce per-player rate limit
+		-- 1. Enforce per-player rate limit (Fail-closed)
 		local rateOk, rateErr = RateLimiter.CheckRateLimit(player, RemoteContracts.RemoteNames.FireWeapon)
 		if not rateOk then
 			warn(string.format("[Security] Player %s rate limited: %s", player.Name, tostring(rateErr)))
@@ -81,14 +94,23 @@ function RemoteManager.Initialize()
 			return
 		end
 
+		-- 3. Normalize raw aimDirection so raw vector magnitude cannot alter projectile speed
+		local normalizedAimDirection = payload.aimDirection.Unit
+
 		-- Validated weapon intent; server resolves firing origin from player's aircraft model and handles cooldowns in CLAY-010.
 	end)
 
+	isInitialized = true
 	print("[CLAYSTRIKE - RemoteManager] Remote listeners initialized with security boundary and rate limiting.")
 end
 
 -- Broadcast state change to all clients
 function RemoteManager.BroadcastGameState(state: string, details: { [string]: any }?)
+	if not gameStateRemote then
+		warn("[RemoteManager] BroadcastGameState called before RemoteManager.Initialize().")
+		return
+	end
+
 	local payload: RemoteContracts.GameStateChangedPayload = {
 		contractVersion = GameConfig.CONTRACT_VERSION,
 		serverTimestamp = os.clock(),

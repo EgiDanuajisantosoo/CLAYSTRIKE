@@ -15,8 +15,8 @@ All network communication between client and server occurs through strongly-type
   ```luau
   {
       contractVersion: string,   -- Must match GameConfig.CONTRACT_VERSION ("1.0.0")
-      clientTimestamp: number,   -- Client os.clock() timestamp for interpolation/latency compensation
-      moveDirection: Vector2,    -- Normalized movement input vector (|v| <= 1.0)
+      clientTimestamp: number,   -- Client os.clock() timestamp (informational only; never trusted for authority)
+      moveDirection: Vector2,    -- Normalized movement input vector (|v| <= 1.05)
   }
   ```
 - **Authoritative Resolution:**
@@ -25,7 +25,7 @@ All network communication between client and server occurs through strongly-type
 - **Validation Rules:**
   - Whitelist key check: Any unrecognized or client-claimed position field results in immediate rejection.
   - Numbers must be finite (not `NaN`, `math.huge`, or `-math.huge`).
-  - `moveDirection.Magnitude` must be $\le 1.05$.
+  - `moveDirection.Magnitude` must be $\le 1.05$ (allowing a uniform 5% margin for analog thumbstick diagonal tolerances).
 
 ---
 
@@ -36,35 +36,43 @@ All network communication between client and server occurs through strongly-type
   ```luau
   {
       contractVersion: string,   -- Must match GameConfig.CONTRACT_VERSION ("1.0.0")
-      clientTimestamp: number,   -- Client os.clock() timestamp
+      clientTimestamp: number,   -- Client os.clock() timestamp (informational only; never trusted for authority)
       weaponId: string,          -- Identifier matching WeaponConfig.Weapons (e.g. "StandardPeaShooter")
-      aimDirection: Vector2,     -- Desired firing direction vector (|v| > 0)
+      aimDirection: Vector2,     -- Desired firing direction vector (0.001 <= |v| <= 1.05)
   }
   ```
 - **Authoritative Resolution:**
   - Client does **not** transmit the firing origin.
   - The server derives firing origin from the authoritative position/attachment points of the player's aircraft model.
+  - The server normalizes `aimDirection.Unit` before spawning projectiles, preventing raw vector magnitudes from altering projectile physics.
   - The server checks whether `weaponId` matches the player's active weapon, verifies cooldown, and authoritatively spawns projectiles and evaluates damage.
 - **Validation Rules:**
   - Whitelist key check: Forbidden fields (e.g., `damage`, `enemyHealth`, `origin`, `reward`) are rejected immediately.
   - Numbers must be finite (not `NaN`, `math.huge`, or `-math.huge`).
   - `weaponId` must exist in `WeaponConfig.Weapons`.
-  - `aimDirection` must have magnitude $> 0.001$.
+  - `aimDirection.Magnitude` must satisfy $0.001 \le |v| \le 1.05$.
 
 ---
 
 ### `GameStateChanged`
 - **Direction:** `Server -> Client`
-- **Purpose:** Replicates session and match state transitions.
+- **Purpose:** Replicates session and match state transitions with strictly-typed metadata.
 - **Payload Schema:**
   ```luau
   {
       contractVersion: string,   -- Must match GameConfig.CONTRACT_VERSION ("1.0.0")
       serverTimestamp: number,   -- Server os.clock() timestamp
       state: string,             -- Member of GameConfig.GameStates ("Lobby", "WaveActive", etc.)
-      details: { [string]: any }?-- Optional metadata (e.g. waveNumber, remainingEnemies)
+      details: { [string]: any }?-- Strongly-validated metadata dictionary (max 5 keys)
   }
   ```
+- **Per-State Details Schema:**
+  - **`Lobby`**: `{ countdown: number? }` (countdown must be finite $\ge 0$)
+  - **`WaveActive`**: `{ waveNumber: number, remainingEnemies: number }` (both must be finite non-negative integers; `waveNumber >= 1`)
+  - **`Intermission`**: `{ countdown: number, nextWave: number }` (`nextWave >= 1` integer)
+  - **`BossPhase`**: `{ bossName: string, phaseNumber: number }` (`bossName` 1-50 chars; `phaseNumber >= 1` integer)
+  - **`MissionSuccess`**: `{ totalWaves: number, missionDuration: number }` (`totalWaves >= 1` integer; `missionDuration >= 0`)
+  - **`MissionFailed`**: `{ waveReached: number, failureReason: string }` (`waveReached >= 1` integer; `failureReason` 1-100 chars)
 
 ---
 
@@ -73,17 +81,21 @@ All network communication between client and server occurs through strongly-type
 1. **Separation of Config from Authority:**
    - `WeaponConfig` defines base damage and cooldown values for client prediction, HUD presentation, and UI.
    - The server is the **sole authority** determining whether a shot is permitted, when cooldown expires, and how much damage is applied. Client-submitted numbers are never trusted for game state changes.
-2. **Explicit Whitelist Schema:**
+2. **Client Timestamps Not Trusted for Authority:**
+   - `clientTimestamp` is included purely for client-side visual interpolation and timeline reconciliation.
+   - The server **never** trusts `clientTimestamp` for weapon cooldowns, rate limits, or authoritative gameplay timelines; server `os.clock()` is always authoritative.
+3. **Explicit Whitelist Schema:**
    - Any client payload containing fields outside the specified schema is rejected immediately.
-3. **Finite Value Verification:**
+4. **Finite Value Verification:**
    - All numerical values (`X`, `Y`, timestamps) must pass finite validation. `NaN`, `math.huge`, and `-math.huge` are strictly forbidden.
-4. **Per-Player Rate Limiting:**
+5. **Fail-Closed Per-Player Rate Limiting:**
    - `RateLimiter` on the server enforces token bucket limits:
      - `MovePlane`: 30 requests/sec with burst allowance of 5.
      - `FireWeapon`: 12 requests/sec with burst allowance of 3.
+   - **Fail-Closed Policy:** Any remote call lacking an explicit rule in `GameConfig.NetworkRateLimits` is rejected immediately.
    - Limit state is stored purely in server memory and cleaned up when players leave.
-5. **Contract Versioning & Strict Instance Check:**
+6. **Contract Versioning & Strict Instance Check:**
    - All network events carry `contractVersion` (`GameConfig.CONTRACT_VERSION = "1.0.0"`).
-   - Remote instances under `ReplicatedStorage.Remotes` are verified with `IsA("RemoteEvent")`. Conflicting ClassNames halt initialization with an explicit error.
-6. **Halt-on-Failure Bootstrap Policy:**
-   - If Explorer baseline validation or contract unit tests fail, the server immediately halts via `error()`, preventing insecure or corrupted network listeners from starting.
+   - Both server and client verify that instances under `ReplicatedStorage.Remotes` are strictly `IsA("RemoteEvent")`. Conflicting ClassNames halt initialization with an explicit error.
+7. **Halt-on-Failure Bootstrap Policy:**
+   - Server bootstrap strictly validates baseline folders and runs 23 contract unit tests **before** creating or binding network listeners. Any failure triggers `error()`, completely halting network initialization.
