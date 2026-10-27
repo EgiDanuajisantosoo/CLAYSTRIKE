@@ -16,6 +16,7 @@ local GameConfig = require(SharedFolder:WaitForChild("GameConfig"))
 local RemoteContracts = require(SharedFolder:WaitForChild("RemoteContracts"))
 local RateLimiter = require(script.Parent:WaitForChild("RateLimiter"))
 local MovementService = require(script.Parent:WaitForChild("MovementService"))
+local WeaponService = require(script.Parent:WaitForChild("WeaponService"))
 
 local RemoteManager = {}
 
@@ -99,7 +100,11 @@ function RemoteManager.Initialize()
 		-- 3. Normalize raw aimDirection so raw vector magnitude cannot alter projectile speed
 		local normalizedAimDirection = payload.aimDirection.Unit
 
-		-- Validated weapon intent; server resolves firing origin from player's aircraft model and handles cooldowns in CLAY-010.
+		-- 4. Authoritatively process firing intent with cooldown and projectile generation
+		local fired, fireErr = WeaponService.HandleFireIntent(player, payload.weaponId, normalizedAimDirection)
+		if not fired and fireErr ~= "CooldownActive" then
+			warn(string.format("[WeaponService] Rejected fire intent from %s: %s", player.Name, tostring(fireErr)))
+		end
 	end)
 
 	isInitialized = true

@@ -21,6 +21,9 @@ local MovementTests = require(script.Parent:WaitForChild("MovementTests"))
 local MovementService = require(script.Parent:WaitForChild("MovementService"))
 local ArenaTests = require(script.Parent:WaitForChild("ArenaTests"))
 local ArenaService = require(script.Parent:WaitForChild("ArenaService"))
+local WeaponTests = require(SharedFolder:WaitForChild("WeaponTests"))
+local WeaponService = require(script.Parent:WaitForChild("WeaponService"))
+local WeaponServiceTests = require(script.Parent:WaitForChild("WeaponServiceTests"))
 
 -- 1. Validate baseline structure
 local baselineSuccess, missing = Architecture.ValidateServerBaseline()
@@ -76,15 +79,40 @@ if arenaSummary.failed > 0 then
 end
 print(string.format("[CLAYSTRIKE - ArenaTests] %d/%d arena boundary tests PASSED.", arenaSummary.passed, arenaSummary.total))
 
--- 6. Initialize authoritative arena boundaries
+-- 6. Execute weapon data definition unit tests
+local weaponSummary = WeaponTests.RunTests()
+if weaponSummary.failed > 0 then
+	error(string.format(
+		"[CLAYSTRIKE - ServerBootstrap] CRITICAL: %d/%d weapon configuration tests FAILED. Halting server initialization.",
+		weaponSummary.failed,
+		weaponSummary.total
+	))
+end
+print(string.format("[CLAYSTRIKE - WeaponTests] %d/%d weapon configuration tests PASSED.", weaponSummary.passed, weaponSummary.total))
+
+-- 7. Execute weapon service combat cadence unit tests
+local weaponServiceSummary = WeaponServiceTests.RunTests(WeaponService)
+if weaponServiceSummary.failed > 0 then
+	error(string.format(
+		"[CLAYSTRIKE - ServerBootstrap] CRITICAL: %d/%d weapon service tests FAILED. Halting server initialization.",
+		weaponServiceSummary.failed,
+		weaponServiceSummary.total
+	))
+end
+print(string.format("[CLAYSTRIKE - WeaponServiceTests] %d/%d weapon service tests PASSED.", weaponServiceSummary.passed, weaponServiceSummary.total))
+
+-- 8. Initialize authoritative arena boundaries
 ArenaService.Initialize()
 
--- 7. Initialize authoritative network remotes & security boundaries
+-- 9. Initialize authoritative network remotes & security boundaries
 RemoteManager.Initialize()
 
--- 8. Initialize authoritative aircraft lifecycle service
+-- 10. Initialize authoritative aircraft lifecycle service
 AircraftService.Initialize()
 
--- 9. Initialize authoritative movement simulation service
+-- 11. Initialize authoritative movement simulation service
 MovementService.Initialize()
+
+-- 12. Initialize authoritative combat weapon service
+WeaponService.Initialize()
 

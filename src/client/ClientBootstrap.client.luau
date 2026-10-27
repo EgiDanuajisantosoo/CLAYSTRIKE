@@ -55,3 +55,6 @@ CameraController.Initialize()
 local BackgroundController = require(script.Parent:WaitForChild("BackgroundController"))
 BackgroundController.Initialize()
 
+local WeaponController = require(script.Parent:WaitForChild("WeaponController"))
+WeaponController.Initialize()
+
