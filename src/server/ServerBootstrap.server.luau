@@ -31,6 +31,8 @@ local EnemyService = require(script.Parent:WaitForChild("EnemyService"))
 local EnemyServiceTests = require(script.Parent:WaitForChild("EnemyServiceTests"))
 local StraightFlyerTests = require(script.Parent:WaitForChild("StraightFlyerTests"))
 local EnemyHealthTests = require(script.Parent:WaitForChild("EnemyHealthTests"))
+local WaveService = require(script.Parent:WaitForChild("WaveService"))
+local WaveManagerTests = require(script.Parent:WaitForChild("WaveManagerTests"))
 
 -- 1. Validate baseline structure
 local baselineSuccess, missing = Architecture.ValidateServerBaseline()
@@ -163,25 +165,40 @@ if healthSummary.failed > 0 then
 end
 print(string.format("[CLAYSTRIKE - EnemyHealthTests] %d/%d enemy health lifecycle tests PASSED.", healthSummary.passed, healthSummary.total))
 
--- 12. Initialize authoritative arena boundaries
+-- 12. Execute wave manager and mission wave configuration unit tests
+local waveSummary = WaveManagerTests.RunTests(WaveService, EnemyService)
+if waveSummary.failed > 0 then
+	error(string.format(
+		"[CLAYSTRIKE - ServerBootstrap] CRITICAL: %d/%d WaveManagerTests FAILED. Halting server initialization.",
+		waveSummary.failed,
+		waveSummary.total
+	))
+end
+print(string.format("[CLAYSTRIKE - WaveManagerTests] %d/%d wave progression tests PASSED.", waveSummary.passed, waveSummary.total))
+
+-- 13. Initialize authoritative arena boundaries
 ArenaService.Initialize()
 
--- 11. Initialize authoritative network remotes & security boundaries
+-- 14. Initialize authoritative network remotes & security boundaries
 RemoteManager.Initialize()
 
--- 12. Initialize authoritative aircraft lifecycle service
+-- 15. Initialize authoritative aircraft lifecycle service
 AircraftService.Initialize()
 
--- 13. Initialize authoritative movement simulation service
+-- 16. Initialize authoritative movement simulation service
 MovementService.Initialize()
 
--- 14. Initialize authoritative projectile simulation service
+-- 17. Initialize authoritative projectile simulation service
 ProjectileService.Initialize()
 
--- 15. Initialize authoritative combat weapon service
+-- 18. Initialize authoritative combat weapon service
 WeaponService.Initialize()
 
--- 16. Initialize authoritative enemy lifecycle service
+-- 19. Initialize authoritative enemy lifecycle service
 EnemyService.Initialize()
+
+-- 20. Initialize authoritative wave progression service
+WaveService.Initialize()
+
 
 

@@ -133,4 +133,11 @@ function RemoteManager.BroadcastGameState(state: string, details: { [string]: an
 	end
 end
 
+--[[
+	Returns true if RemoteManager is initialized.
+]]
+function RemoteManager.IsInitialized(): boolean
+	return isInitialized
+end
+
 return RemoteManager
