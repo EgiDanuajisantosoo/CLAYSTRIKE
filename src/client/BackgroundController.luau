@@ -15,7 +15,11 @@ local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local SharedFolder = ReplicatedStorage:WaitForChild("Shared")
-local GameConfig = require(SharedFolder:WaitForChild("GameConfig"))
+local sharedGameConfig = SharedFolder:WaitForChild("GameConfig")
+local GameConfig = require(sharedGameConfig)
+if (GameConfig :: any).Background == nil then
+	GameConfig = require(sharedGameConfig:Clone())
+end
 
 local BackgroundController = {}
 
@@ -27,7 +31,7 @@ type TileData = {
 	width: number,
 }
 
-type LayerRuntime = {
+export type LayerRuntime = {
 	name: string,
 	zOffset: number,
 	speed: number,
@@ -35,10 +39,12 @@ type LayerRuntime = {
 	tiles: { TileData },
 	totalTiledWidth: number,
 	container: Model,
+	wrapCount: number,
 }
 
 local isInitialized = false
 local layers: { LayerRuntime } = {}
+local totalWrapCount = 0
 local backgroundContainer: Model? = nil
 local renderStepConnection: RBXScriptConnection? = nil
 
@@ -49,7 +55,9 @@ local renderStepConnection: RBXScriptConnection? = nil
 local function calculateVisibleSpanForZ(layerZ: number): number
 	local camera = Workspace.CurrentCamera
 	local fov = if camera then camera.FieldOfView else GameConfig.Camera.FieldOfView
-	local cameraZ = GameConfig.Arena.PlayPlaneZ + GameConfig.Camera.Distance
+	local cameraZ = if camera and camera.CFrame.Position.Z ~= 0
+		then camera.CFrame.Position.Z
+		else (GameConfig.Arena.PlayPlaneZ + GameConfig.Camera.Distance)
 	local distance = math.abs(cameraZ - layerZ)
 
 	-- Vertical height visible at this Z depth: 2 * distance * tan(FOV / 2)
@@ -143,6 +151,7 @@ function BackgroundController.BuildLayers()
 	container.Parent = Workspace
 	backgroundContainer = container
 	layers = {}
+	totalWrapCount = 0
 
 	local layerConfigs = GameConfig.Background.Layers
 	local baseSpeed = GameConfig.Background.BaseScrollSpeed
@@ -194,6 +203,7 @@ function BackgroundController.BuildLayers()
 			tiles = tiles,
 			totalTiledWidth = totalTiledW,
 			container = layerModel,
+			wrapCount = 0,
 		}
 		table.insert(layers, layerData)
 	end
@@ -221,9 +231,12 @@ function BackgroundController.StepScroll(dt: number)
 			local currentX = tile.rootPart.Position.X
 			local newX = currentX - moveDist
 
-			-- If tile scrolled fully off the left side, wrap it to the far right by exactly totalTiledWidth
-			if newX < leftWrapThreshold then
+			-- If tile scrolled fully off the left side, wrap it to the far right.
+			-- Uses a while loop to handle large dt (frame spikes) deterministically without stranding tiles outside view.
+			while newX < leftWrapThreshold do
 				newX = newX + layer.totalTiledWidth
+				layer.wrapCount += 1
+				totalWrapCount += 1
 			end
 
 			local deltaX = newX - currentX
@@ -282,6 +295,25 @@ function BackgroundController.GetContainer(): Model?
 end
 
 --[[
+	Returns the total number of tile wrap events across all layers since initialization or build.
+]]
+function BackgroundController.GetTotalWrapCount(): number
+	return totalWrapCount
+end
+
+--[[
+	Returns the wrap count for a specific layer by name, or 0 if not found.
+]]
+function BackgroundController.GetLayerWrapCount(layerName: string): number
+	for _, layer in ipairs(layers) do
+		if layer.name == layerName then
+			return layer.wrapCount
+		end
+	end
+	return 0
+end
+
+--[[
 	Test helper to clean up background models and disconnect the render loop.
 ]]
 function BackgroundController._Teardown()
@@ -294,6 +326,7 @@ function BackgroundController._Teardown()
 		backgroundContainer = nil
 	end
 	layers = {}
+	totalWrapCount = 0
 	isInitialized = false
 end
 
