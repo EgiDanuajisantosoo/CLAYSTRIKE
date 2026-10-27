@@ -5,7 +5,8 @@
 	Task: CLAY-002 (Define Remote Contracts & Shared Config)
 
 	Tests valid payloads and strictly asserts that malformed, non-finite,
-	version-mismatched, and illegal-keyed payloads are safely rejected.
+	version-mismatched, client-claimed position/origin, and illegal-keyed
+	payloads are safely rejected.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -36,130 +37,141 @@ function ContractTests.RunTests(): { total: number, passed: number, failed: numb
 		end
 	end
 
-	-- 1. Valid MovePlane Payload
+	-- 1. Valid MovePlane Payload (pure intent: direction only, no client position)
 	local validMove = {
 		contractVersion = GameConfig.CONTRACT_VERSION,
 		clientTimestamp = 100.5,
-		position = Vector2.new(10, 5),
 		moveDirection = Vector2.new(1, 0),
 	}
 	local ok1, err1 = RemoteContracts.ValidateMovePlane(validMove)
-	assertTest("Valid MovePlane payload is accepted", ok1 == true, err1)
+	assertTest("Valid MovePlane intent payload is accepted", ok1 == true, err1)
 
-	-- 2. Malformed MovePlane: NaN position
+	-- 2. Malformed MovePlane: Client attempts to send position (rejected by whitelist)
+	local clientPositionMove = {
+		contractVersion = GameConfig.CONTRACT_VERSION,
+		clientTimestamp = 100.5,
+		moveDirection = Vector2.new(1, 0),
+		position = Vector2.new(10, 5), -- FORBIDDEN: Server calculates position
+	}
+	local ok2 = RemoteContracts.ValidateMovePlane(clientPositionMove)
+	assertTest("MovePlane with client-provided position is rejected", ok2 == false)
+
+	-- 3. Malformed MovePlane: NaN moveDirection
 	local nanMove = {
 		contractVersion = GameConfig.CONTRACT_VERSION,
 		clientTimestamp = 100.5,
-		position = Vector2.new(0 / 0, 0),
-		moveDirection = Vector2.new(1, 0),
+		moveDirection = Vector2.new(0 / 0, 0),
 	}
-	local ok2 = RemoteContracts.ValidateMovePlane(nanMove)
-	assertTest("MovePlane with NaN position is rejected", ok2 == false)
+	local ok3 = RemoteContracts.ValidateMovePlane(nanMove)
+	assertTest("MovePlane with NaN moveDirection is rejected", ok3 == false)
 
-	-- 3. Malformed MovePlane: math.huge (Infinity)
+	-- 4. Malformed MovePlane: math.huge (Infinity)
 	local infMove = {
 		contractVersion = GameConfig.CONTRACT_VERSION,
 		clientTimestamp = 100.5,
-		position = Vector2.new(math.huge, 0),
-		moveDirection = Vector2.new(1, 0),
+		moveDirection = Vector2.new(math.huge, 0),
 	}
-	local ok3 = RemoteContracts.ValidateMovePlane(infMove)
-	assertTest("MovePlane with Infinity position is rejected", ok3 == false)
+	local ok4 = RemoteContracts.ValidateMovePlane(infMove)
+	assertTest("MovePlane with Infinity moveDirection is rejected", ok4 == false)
 
-	-- 4. Malformed MovePlane: Illegal forbidden field (damage)
+	-- 5. Malformed MovePlane: Excessive direction magnitude (> 1.05)
+	local excessiveMove = {
+		contractVersion = GameConfig.CONTRACT_VERSION,
+		clientTimestamp = 100.5,
+		moveDirection = Vector2.new(5.0, 5.0),
+	}
+	local ok5 = RemoteContracts.ValidateMovePlane(excessiveMove)
+	assertTest("MovePlane with unnormalized/excessive magnitude is rejected", ok5 == false)
+
+	-- 6. Malformed MovePlane: Illegal forbidden field (damage)
 	local exploitMove = {
 		contractVersion = GameConfig.CONTRACT_VERSION,
 		clientTimestamp = 100.5,
-		position = Vector2.new(10, 5),
 		moveDirection = Vector2.new(1, 0),
 		damage = 9999, -- FORBIDDEN
 	}
-	local ok4 = RemoteContracts.ValidateMovePlane(exploitMove)
-	assertTest("MovePlane with forbidden 'damage' field is rejected", ok4 == false)
+	local ok6 = RemoteContracts.ValidateMovePlane(exploitMove)
+	assertTest("MovePlane with forbidden 'damage' field is rejected", ok6 == false)
 
-	-- 5. Malformed MovePlane: Out of arena bounds
-	local oobMove = {
-		contractVersion = GameConfig.CONTRACT_VERSION,
-		clientTimestamp = 100.5,
-		position = Vector2.new(9999, 9999),
-		moveDirection = Vector2.new(1, 0),
-	}
-	local ok5 = RemoteContracts.ValidateMovePlane(oobMove)
-	assertTest("MovePlane with out-of-bounds position is rejected", ok5 == false)
-
-	-- 6. Malformed MovePlane: Contract version mismatch
+	-- 7. Malformed MovePlane: Contract version mismatch
 	local versionMismatchMove = {
 		contractVersion = "9.9.9",
 		clientTimestamp = 100.5,
-		position = Vector2.new(10, 5),
 		moveDirection = Vector2.new(1, 0),
 	}
-	local ok6 = RemoteContracts.ValidateMovePlane(versionMismatchMove)
-	assertTest("MovePlane with mismatched contract version is rejected", ok6 == false)
+	local ok7 = RemoteContracts.ValidateMovePlane(versionMismatchMove)
+	assertTest("MovePlane with mismatched contract version is rejected", ok7 == false)
 
-	-- 7. Valid FireWeapon Payload
+	-- 8. Valid FireWeapon Payload (pure intent: weaponId + aimDirection, no client origin)
 	local validFire = {
 		contractVersion = GameConfig.CONTRACT_VERSION,
 		clientTimestamp = 101.2,
 		weaponId = "StandardPeaShooter",
-		origin = Vector2.new(0, 0),
 		aimDirection = Vector2.new(1, 0),
 	}
-	local ok7, err7 = RemoteContracts.ValidateFireWeapon(validFire)
-	assertTest("Valid FireWeapon payload is accepted", ok7 == true, err7)
+	local ok8, err8 = RemoteContracts.ValidateFireWeapon(validFire)
+	assertTest("Valid FireWeapon intent payload is accepted", ok8 == true, err8)
 
-	-- 8. Malformed FireWeapon: Illegal forbidden field (enemyHealth)
+	-- 9. Malformed FireWeapon: Client attempts to send origin (rejected by whitelist)
+	local clientOriginFire = {
+		contractVersion = GameConfig.CONTRACT_VERSION,
+		clientTimestamp = 101.2,
+		weaponId = "StandardPeaShooter",
+		origin = Vector2.new(100, 200), -- FORBIDDEN: Server determines origin
+		aimDirection = Vector2.new(1, 0),
+	}
+	local ok9 = RemoteContracts.ValidateFireWeapon(clientOriginFire)
+	assertTest("FireWeapon with client-provided origin is rejected", ok9 == false)
+
+	-- 10. Malformed FireWeapon: Illegal forbidden field (enemyHealth)
 	local exploitFire = {
 		contractVersion = GameConfig.CONTRACT_VERSION,
 		clientTimestamp = 101.2,
 		weaponId = "StandardPeaShooter",
-		origin = Vector2.new(0, 0),
 		aimDirection = Vector2.new(1, 0),
 		enemyHealth = 0, -- FORBIDDEN
 	}
-	local ok8 = RemoteContracts.ValidateFireWeapon(exploitFire)
-	assertTest("FireWeapon with forbidden 'enemyHealth' field is rejected", ok8 == false)
+	local ok10 = RemoteContracts.ValidateFireWeapon(exploitFire)
+	assertTest("FireWeapon with forbidden 'enemyHealth' field is rejected", ok10 == false)
 
-	-- 9. Malformed FireWeapon: Unknown weaponId
+	-- 11. Malformed FireWeapon: Unknown weaponId
 	local fakeWeaponFire = {
 		contractVersion = GameConfig.CONTRACT_VERSION,
 		clientTimestamp = 101.2,
 		weaponId = "NonExistentNuke9000",
-		origin = Vector2.new(0, 0),
 		aimDirection = Vector2.new(1, 0),
 	}
-	local ok9 = RemoteContracts.ValidateFireWeapon(fakeWeaponFire)
-	assertTest("FireWeapon with unknown weaponId is rejected", ok9 == false)
+	local ok11 = RemoteContracts.ValidateFireWeapon(fakeWeaponFire)
+	assertTest("FireWeapon with unknown weaponId is rejected", ok11 == false)
 
-	-- 10. Malformed FireWeapon: Zero aim vector
+	-- 12. Malformed FireWeapon: Zero aim vector
 	local zeroAimFire = {
 		contractVersion = GameConfig.CONTRACT_VERSION,
 		clientTimestamp = 101.2,
 		weaponId = "StandardPeaShooter",
-		origin = Vector2.new(0, 0),
 		aimDirection = Vector2.new(0, 0),
 	}
-	local ok10 = RemoteContracts.ValidateFireWeapon(zeroAimFire)
-	assertTest("FireWeapon with zero aim vector is rejected", ok10 == false)
+	local ok12 = RemoteContracts.ValidateFireWeapon(zeroAimFire)
+	assertTest("FireWeapon with zero aim vector is rejected", ok12 == false)
 
-	-- 11. Valid GameStateChanged Payload
+	-- 13. Valid GameStateChanged Payload
 	local validState = {
 		contractVersion = GameConfig.CONTRACT_VERSION,
 		serverTimestamp = 102.0,
 		state = "WaveActive",
 		details = { waveNumber = 1 },
 	}
-	local ok11, err11 = RemoteContracts.ValidateGameStateChanged(validState)
-	assertTest("Valid GameStateChanged payload is accepted", ok11 == true, err11)
+	local ok13, err13 = RemoteContracts.ValidateGameStateChanged(validState)
+	assertTest("Valid GameStateChanged payload is accepted", ok13 == true, err13)
 
-	-- 12. Malformed GameStateChanged: Invalid state enum
+	-- 14. Malformed GameStateChanged: Invalid state enum
 	local invalidState = {
 		contractVersion = GameConfig.CONTRACT_VERSION,
 		serverTimestamp = 102.0,
 		state = "AdminNukeAllEnemies",
 	}
-	local ok12 = RemoteContracts.ValidateGameStateChanged(invalidState)
-	assertTest("GameStateChanged with unknown state is rejected", ok12 == false)
+	local ok14 = RemoteContracts.ValidateGameStateChanged(invalidState)
+	assertTest("GameStateChanged with unknown state is rejected", ok14 == false)
 
 	return {
 		total = passedCount + failedCount,

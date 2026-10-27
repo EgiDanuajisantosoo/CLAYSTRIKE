@@ -5,10 +5,11 @@
 	Task: CLAY-002 (Define Remote Contracts & Shared Config)
 
 	SECURITY POLICY:
-	1. All client payloads are strictly validated before acceptance.
-	2. Extra or unknown fields (whitelist validation) cause immediate rejection.
-	3. Non-finite values (NaN, Inf, -Inf) cause immediate rejection.
-	4. Client payloads NEVER contain authoritative damage, health, rewards, or game outcome.
+	1. Pure Movement Intent: Client sends moveDirection; server calculates and enforces position.
+	2. Authoritative Firing Origin: Client sends weaponId and aimDirection; server determines origin from authoritative aircraft state.
+	3. Strict Whitelist Schema: Unknown or illegal fields (including client-claimed 'position' or 'origin') cause immediate rejection.
+	4. Finite Value Verification: Non-finite values (NaN, Inf, -Inf) cause immediate rejection.
+	5. No Client Authority: Client payloads NEVER contain authoritative damage, health, rewards, or game outcome.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -19,7 +20,6 @@ local WeaponConfig = require(SharedFolder:WaitForChild("WeaponConfig"))
 export type MovePlanePayload = {
 	contractVersion: string,
 	clientTimestamp: number,
-	position: Vector2,
 	moveDirection: Vector2,
 }
 
@@ -27,7 +27,6 @@ export type FireWeaponPayload = {
 	contractVersion: string,
 	clientTimestamp: number,
 	weaponId: string,
-	origin: Vector2,
 	aimDirection: Vector2,
 }
 
@@ -40,7 +39,7 @@ export type GameStateChangedPayload = {
 
 local RemoteContracts = {}
 
--- Remote event names
+-- Canonical RemoteEvent names
 RemoteContracts.RemoteNames = {
 	MovePlane = "MovePlane",
 	FireWeapon = "FireWeapon",
@@ -57,7 +56,7 @@ local function isFiniteVector2(v: any): boolean
 	return typeof(v) == "Vector2" and isFiniteNumber(v.X) and isFiniteNumber(v.Y)
 end
 
--- Ensure payload contains exactly allowed keys and no unexpected fields
+-- Ensure payload contains exactly allowed keys and no unexpected/forbidden fields
 local function hasOnlyAllowedKeys(tbl: { [any]: any }, allowed: { [string]: boolean }): (boolean, string?)
 	if typeof(tbl) ~= "table" then
 		return false, "Payload must be a table."
@@ -73,7 +72,6 @@ end
 local MOVE_PLANE_ALLOWED_KEYS = {
 	contractVersion = true,
 	clientTimestamp = true,
-	position = true,
 	moveDirection = true,
 }
 
@@ -81,7 +79,6 @@ local FIRE_WEAPON_ALLOWED_KEYS = {
 	contractVersion = true,
 	clientTimestamp = true,
 	weaponId = true,
-	origin = true,
 	aimDirection = true,
 }
 
@@ -95,6 +92,7 @@ local GAME_STATE_ALLOWED_KEYS = {
 --[[
 	Validates incoming MovePlane client request.
 	Direction: Client -> Server
+	Note: Client submits directional intent; server calculates actual position.
 ]]
 function RemoteContracts.ValidateMovePlane(payload: any): (boolean, string?)
 	local keysOk, keyErr = hasOnlyAllowedKeys(payload, MOVE_PLANE_ALLOWED_KEYS)
@@ -110,23 +108,11 @@ function RemoteContracts.ValidateMovePlane(payload: any): (boolean, string?)
 		return false, "Invalid or non-finite clientTimestamp."
 	end
 
-	if not isFiniteVector2(payload.position) then
-		return false, "Invalid or non-finite position Vector2."
-	end
-
-	-- Verify position is within plausible arena bounds (+ margin for interpolation)
-	local arena = GameConfig.Arena
-	local margin = 20
-	if payload.position.X < arena.MinX - margin or payload.position.X > arena.MaxX + margin or
-	   payload.position.Y < arena.MinY - margin or payload.position.Y > arena.MaxY + margin then
-		return false, "Position out of plausible arena boundaries."
-	end
-
 	if not isFiniteVector2(payload.moveDirection) then
 		return false, "Invalid or non-finite moveDirection Vector2."
 	end
 
-	-- Move direction magnitude cannot exceed unit vector with tolerance
+	-- Move direction magnitude cannot exceed unit vector with reasonable input tolerance
 	if payload.moveDirection.Magnitude > 1.05 then
 		return false, "moveDirection magnitude exceeds normalized unit vector."
 	end
@@ -137,6 +123,7 @@ end
 --[[
 	Validates incoming FireWeapon client request.
 	Direction: Client -> Server
+	Note: Client requests weapon fire intent; server resolves firing origin from authoritative aircraft model.
 ]]
 function RemoteContracts.ValidateFireWeapon(payload: any): (boolean, string?)
 	local keysOk, keyErr = hasOnlyAllowedKeys(payload, FIRE_WEAPON_ALLOWED_KEYS)
@@ -154,10 +141,6 @@ function RemoteContracts.ValidateFireWeapon(payload: any): (boolean, string?)
 
 	if typeof(payload.weaponId) ~= "string" or not WeaponConfig.GetWeapon(payload.weaponId) then
 		return false, string.format("Unknown or invalid weaponId: %s", tostring(payload.weaponId))
-	end
-
-	if not isFiniteVector2(payload.origin) then
-		return false, "Invalid or non-finite origin Vector2."
 	end
 
 	if not isFiniteVector2(payload.aimDirection) or payload.aimDirection.Magnitude < 0.001 then
