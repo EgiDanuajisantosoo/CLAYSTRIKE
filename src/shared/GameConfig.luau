@@ -37,6 +37,19 @@ export type CameraConfig = {
 	MaxY: number,
 }
 
+export type ParallaxLayerConfig = {
+	name: string,
+	zOffset: number,
+	speedMultiplier: number,
+	tileWidth: number,
+	color: Color3,
+}
+
+export type BackgroundConfig = {
+	BaseScrollSpeed: number,
+	Layers: { ParallaxLayerConfig },
+}
+
 local GameConfig = {}
 
 -- Contract versioning policy. Mismatches are rejected by the server validator.
@@ -71,6 +84,34 @@ GameConfig.Camera = {
 	MinY = -25,
 	MaxY = 25,
 } :: CameraConfig
+
+-- 2.5D Parallax scrolling background configuration
+GameConfig.Background = {
+	BaseScrollSpeed = 24,
+	Layers = {
+		{
+			name = "NearClouds",
+			zOffset = -25,
+			speedMultiplier = 1.0,
+			tileWidth = 140,
+			color = Color3.fromRGB(180, 160, 145),
+		},
+		{
+			name = "MidMountains",
+			zOffset = -60,
+			speedMultiplier = 0.5,
+			tileWidth = 180,
+			color = Color3.fromRGB(120, 100, 90),
+		},
+		{
+			name = "FarSkyline",
+			zOffset = -110,
+			speedMultiplier = 0.2,
+			tileWidth = 240,
+			color = Color3.fromRGB(80, 70, 75),
+		},
+	},
+} :: BackgroundConfig
 
 -- Canonical session game states replicated to all clients
 GameConfig.GameStates = {

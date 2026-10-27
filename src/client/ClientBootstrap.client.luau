@@ -52,3 +52,6 @@ MovementController.Initialize()
 local CameraController = require(script.Parent:WaitForChild("CameraController"))
 CameraController.Initialize()
 
+local BackgroundController = require(script.Parent:WaitForChild("BackgroundController"))
+BackgroundController.Initialize()
+

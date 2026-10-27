@@ -19,6 +19,8 @@ local AircraftTests = require(script.Parent:WaitForChild("AircraftTests"))
 local AircraftService = require(script.Parent:WaitForChild("AircraftService"))
 local MovementTests = require(script.Parent:WaitForChild("MovementTests"))
 local MovementService = require(script.Parent:WaitForChild("MovementService"))
+local ArenaTests = require(script.Parent:WaitForChild("ArenaTests"))
+local ArenaService = require(script.Parent:WaitForChild("ArenaService"))
 
 -- 1. Validate baseline structure
 local baselineSuccess, missing = Architecture.ValidateServerBaseline()
@@ -63,12 +65,26 @@ if movementSummary.failed > 0 then
 end
 print(string.format("[CLAYSTRIKE - MovementTests] %d/%d movement tests PASSED.", movementSummary.passed, movementSummary.total))
 
--- 5. Initialize authoritative network remotes & security boundaries
+-- 5. Execute arena boundary unit tests
+local arenaSummary = ArenaTests.RunTests()
+if arenaSummary.failed > 0 then
+	error(string.format(
+		"[CLAYSTRIKE - ServerBootstrap] CRITICAL: %d/%d arena tests FAILED. Halting server initialization.",
+		arenaSummary.failed,
+		arenaSummary.total
+	))
+end
+print(string.format("[CLAYSTRIKE - ArenaTests] %d/%d arena boundary tests PASSED.", arenaSummary.passed, arenaSummary.total))
+
+-- 6. Initialize authoritative arena boundaries
+ArenaService.Initialize()
+
+-- 7. Initialize authoritative network remotes & security boundaries
 RemoteManager.Initialize()
 
--- 6. Initialize authoritative aircraft lifecycle service
+-- 8. Initialize authoritative aircraft lifecycle service
 AircraftService.Initialize()
 
--- 7. Initialize authoritative movement simulation service
+-- 9. Initialize authoritative movement simulation service
 MovementService.Initialize()
 
