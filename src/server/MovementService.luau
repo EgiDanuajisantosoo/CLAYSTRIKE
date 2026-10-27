@@ -26,6 +26,7 @@ type InputRecord = {
 local playerInputs: { [number]: InputRecord } = {}
 local playerVelocities: { [number]: Vector2 } = {}
 local heartbeatConnection: RBXScriptConnection? = nil
+local playerRemovingConnection: RBXScriptConnection? = nil
 local isInitialized = false
 
 -- Test clock override for deterministic simulation
@@ -221,7 +222,7 @@ function MovementService.Initialize()
 
 	heartbeatConnection = RunService.Heartbeat:Connect(onHeartbeat)
 
-	Players.PlayerRemoving:Connect(function(player)
+	playerRemovingConnection = Players.PlayerRemoving:Connect(function(player)
 		MovementService.CleanupPlayer(player.UserId)
 	end)
 
@@ -259,12 +260,23 @@ function MovementService._SetLastReceived(userId: number, timestamp: number)
 end
 
 --[[
-	Test helper to disconnect heartbeat and restore uninitialized state (for isolated tests).
+	Test helper to inspect internal connections.
+]]
+function MovementService._GetConnections(): (RBXScriptConnection?, RBXScriptConnection?)
+	return heartbeatConnection, playerRemovingConnection
+end
+
+--[[
+	Test helper to disconnect all connections and restore uninitialized state (for isolated tests).
 ]]
 function MovementService._Teardown()
 	if heartbeatConnection then
 		heartbeatConnection:Disconnect()
 		heartbeatConnection = nil
+	end
+	if playerRemovingConnection then
+		playerRemovingConnection:Disconnect()
+		playerRemovingConnection = nil
 	end
 	isInitialized = false
 	playerInputs = {}

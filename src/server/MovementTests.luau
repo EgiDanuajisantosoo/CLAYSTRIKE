@@ -208,7 +208,20 @@ function MovementTests.RunTests(): { total: number, passed: number, failed: numb
 	isolatedService.Initialize() -- duplicate call to test idempotency
 	assertTest("Duplicate Initialize() is safely idempotent", isolatedService.IsInitialized() == true)
 
+	-- Verify both Heartbeat and PlayerRemoving connections are actively connected
+	local hbConn, prConn = isolatedService._GetConnections()
+	assertTest("Isolated service established active Heartbeat connection", hbConn ~= nil and hbConn.Connected == true)
+	assertTest("Isolated service established active PlayerRemoving connection", prConn ~= nil and prConn.Connected == true)
+
 	isolatedService._Teardown()
+
+	-- Assert that both connections were safely disconnected upon teardown
+	assertTest("Heartbeat connection is disconnected after teardown", hbConn.Connected == false)
+	assertTest("PlayerRemoving connection is disconnected after teardown", prConn.Connected == false)
+
+	local postHb, postPr = isolatedService._GetConnections()
+	assertTest("Internal connection references are nil after teardown", postHb == nil and postPr == nil)
+
 	isolatedModule:Destroy()
 
 	-- Assert production MovementService was NOT initialized during test run
