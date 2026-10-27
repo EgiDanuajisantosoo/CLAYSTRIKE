@@ -3,6 +3,13 @@
 	AircraftTests.luau
 	Authoritative unit test harness for AircraftFactory and AircraftService lifecycle.
 	Task: CLAY-003 (Create Placeholder Aircraft Model Factory)
+
+	Covers:
+	- Model creation, naming, attributes, attachments, 2.5D position & orientation.
+	- Rigid assembly: WeldConstraints, Anchored, and CanCollide on ALL BaseParts.
+	- Multi-player isolation, idempotency, and clean despawn.
+	- Stale model lookup validation.
+	- Disconnected player race condition protection.
 ]]
 
 local Workspace = game:GetService("Workspace")
@@ -55,8 +62,6 @@ function AircraftTests.RunTests(): { total: number, passed: number, failed: numb
 	local primaryPart = plane.PrimaryPart
 	assertTest("Aircraft Model has a valid PrimaryPart named RootPart", primaryPart ~= nil and primaryPart.Name == "RootPart")
 	if primaryPart then
-		assertTest("PrimaryPart is Anchored", primaryPart.Anchored == true)
-		assertTest("PrimaryPart CanCollide is false", primaryPart.CanCollide == false)
 		assertTest(
 			"Aircraft is positioned strictly at PlayPlaneZ = 0",
 			math.abs(primaryPart.Position.Z - GameConfig.Arena.PlayPlaneZ) < 0.001
@@ -77,7 +82,45 @@ function AircraftTests.RunTests(): { total: number, passed: number, failed: numb
 	assertTest("Aircraft includes TailWing part", tailWing ~= nil and tailWing:IsA("BasePart"))
 	assertTest("Aircraft includes Cockpit part", cockpit ~= nil and cockpit:IsA("BasePart"))
 
-	-- Test 4: Essential attachments exist
+	-- Test 4: Rigid Assembly & Physics properties on ALL BaseParts
+	local allPartsAnchored = true
+	local allPartsNonCollide = true
+	local partCount = 0
+
+	for _, descendant in ipairs(plane:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			partCount += 1
+			if not descendant.Anchored then
+				allPartsAnchored = false
+			end
+			if descendant.CanCollide then
+				allPartsNonCollide = false
+			end
+		end
+	end
+	assertTest("Plane has at least 5 BaseParts (fuselage, wings, tail fin, tail wing, cockpit)", partCount >= 5)
+	assertTest("ALL BaseParts in aircraft are Anchored = true", allPartsAnchored)
+	assertTest("ALL BaseParts in aircraft are CanCollide = false", allPartsNonCollide)
+
+	-- Test 5: Rigid Assembly WeldConstraints for every non-root part
+	local nonRootParts = { wings, tailFin, tailWing, cockpit }
+	for _, part in ipairs(nonRootParts) do
+		if part and primaryPart then
+			local foundWeld: WeldConstraint? = nil
+			for _, desc in ipairs(plane:GetDescendants()) do
+				if desc:IsA("WeldConstraint") and desc.Part0 == primaryPart and desc.Part1 == part then
+					foundWeld = desc
+					break
+				end
+			end
+			assertTest(
+				string.format("Rigid assembly: %s is connected to RootPart via enabled WeldConstraint", part.Name),
+				foundWeld ~= nil and foundWeld.Enabled == true
+			)
+		end
+	end
+
+	-- Test 6: Essential attachments exist
 	if primaryPart then
 		local muzzle = primaryPart:FindFirstChild("Muzzle")
 		local exhaust = primaryPart:FindFirstChild("Exhaust")
@@ -85,24 +128,43 @@ function AircraftTests.RunTests(): { total: number, passed: number, failed: numb
 		assertTest("Aircraft has Exhaust attachment inside PrimaryPart", exhaust ~= nil and exhaust:IsA("Attachment"))
 	end
 
-	-- Test 5: Attributes are properly set
+	-- Test 7: Attributes are properly set
 	assertTest("Model has OwnerUserId attribute matching UserId", plane:GetAttribute("OwnerUserId") == testUserId)
 	assertTest("Model has AircraftType attribute", plane:GetAttribute("AircraftType") == "StandardFighter")
 	assertTest("Model has Health attribute equal to 100", plane:GetAttribute("Health") == 100)
 	assertTest("Model has MaxHealth attribute equal to 100", plane:GetAttribute("MaxHealth") == 100)
 
-	-- Test 6: Lifecycle in Workspace.ActivePlanes
+	-- Test 8: Lifecycle in Workspace.ActivePlanes
 	plane.Parent = activePlanesFolder
 	assertTest("Plane can be parented to Workspace.ActivePlanes", plane.Parent == activePlanesFolder)
 	plane:Destroy()
 	assertTest("Destroying plane removes it from Workspace.ActivePlanes", activePlanesFolder:FindFirstChild(string.format("Plane_%d", testUserId)) == nil)
 
-	-- Test 7: AircraftService despawn orphan cleanup
+	-- Test 9: AircraftService despawn orphan cleanup
 	local orphanPlane = AircraftFactory.CreatePlaceholderPlane(testUserId)
 	orphanPlane.Parent = activePlanesFolder
 	AircraftService.DespawnPlaneForPlayer(testUserId)
 	local remaining = activePlanesFolder:FindFirstChild(string.format("Plane_%d", testUserId))
 	assertTest("DespawnPlaneForPlayer leaves zero orphaned models for UserId", remaining == nil)
+
+	-- Test 10: Stale model lookup validation
+	local staleTestUser = { UserId = 777001, Name = "StalePilot" }
+	local stalePlane = AircraftService.SpawnPlaneForPlayer(staleTestUser)
+	assertTest("Spawned plane for stale lookup test is active", AircraftService.GetPlaneForPlayer(staleTestUser) == stalePlane)
+	-- Destroy the plane externally
+	if stalePlane then
+		stalePlane:Destroy()
+	end
+	-- Lookup should detect stale state, clean tracking, and return nil
+	assertTest("GetPlaneForPlayer returns nil when model is destroyed externally", AircraftService.GetPlaneForPlayer(staleTestUser) == nil)
+	assertTest("GetPlaneByUserId returns nil when model is destroyed externally", AircraftService.GetPlaneByUserId(staleTestUser.UserId) == nil)
+
+	-- Test 11: Disconnected player spawn protection (race condition guard)
+	local disconnectedUser = { UserId = 666001, Name = "DisconnectedPilot", isDisconnected = true }
+	local blockedSpawn = AircraftService.SpawnPlaneForPlayer(disconnectedUser)
+	assertTest("SpawnPlaneForPlayer returns nil when player is already disconnected", blockedSpawn == nil)
+	local leftoverModel = activePlanesFolder:FindFirstChild("Plane_666001")
+	assertTest("No orphaned model created in ActivePlanes for disconnected player", leftoverModel == nil)
 
 	-- Multi-player Lifecycle Integration Tests
 	local mockPlayer1 = { UserId = 888001, Name = "PilotAlpha" }
@@ -112,31 +174,35 @@ function AircraftTests.RunTests(): { total: number, passed: number, failed: numb
 	AircraftService.DespawnPlaneForPlayer(mockPlayer1.UserId)
 	AircraftService.DespawnPlaneForPlayer(mockPlayer2.UserId)
 
-	-- Test 8: Concurrent multi-player spawn creates distinct planes
+	-- Test 12: Concurrent multi-player spawn creates distinct planes
 	local p1Plane = AircraftService.SpawnPlaneForPlayer(mockPlayer1)
 	local p2Plane = AircraftService.SpawnPlaneForPlayer(mockPlayer2)
-	assertTest("Player 1 gets plane parented to ActivePlanes", p1Plane.Parent == activePlanesFolder)
-	assertTest("Player 2 gets plane parented to ActivePlanes", p2Plane.Parent == activePlanesFolder)
+	assertTest("Player 1 gets plane parented to ActivePlanes", p1Plane ~= nil and p1Plane.Parent == activePlanesFolder)
+	assertTest("Player 2 gets plane parented to ActivePlanes", p2Plane ~= nil and p2Plane.Parent == activePlanesFolder)
 	assertTest("Planes for different players are distinct instances", p1Plane ~= p2Plane)
-	assertTest("Player 1 plane OwnerUserId is 888001", p1Plane:GetAttribute("OwnerUserId") == 888001)
-	assertTest("Player 2 plane OwnerUserId is 888002", p2Plane:GetAttribute("OwnerUserId") == 888002)
+	if p1Plane then
+		assertTest("Player 1 plane OwnerUserId is 888001", p1Plane:GetAttribute("OwnerUserId") == 888001)
+	end
+	if p2Plane then
+		assertTest("Player 2 plane OwnerUserId is 888002", p2Plane:GetAttribute("OwnerUserId") == 888002)
+	end
 
-	-- Test 9: Idempotency (re-spawning player does not create duplicate planes)
+	-- Test 13: Idempotency (re-spawning player does not create duplicate planes)
 	local duplicateP1 = AircraftService.SpawnPlaneForPlayer(mockPlayer1)
 	assertTest("SpawnPlaneForPlayer is idempotent and returns existing plane", duplicateP1 == p1Plane)
 
-	-- Test 10: Player 1 leaves, Player 2 plane remains unaffected
+	-- Test 14: Player 1 leaves, Player 2 plane remains unaffected
 	AircraftService.DespawnPlaneForPlayer(mockPlayer1)
 	assertTest("Player 1 plane is removed from ActivePlanes on leave", activePlanesFolder:FindFirstChild("Plane_888001") == nil)
-	assertTest("Player 1 plane reference is destroyed", p1Plane.Parent == nil)
-	assertTest("Player 2 plane remains intact in ActivePlanes", activePlanesFolder:FindFirstChild("Plane_888002") == p2Plane)
+	assertTest("Player 1 plane reference is destroyed", p1Plane ~= nil and p1Plane.Parent == nil)
+	assertTest("Player 2 plane remains intact in ActivePlanes", p2Plane ~= nil and activePlanesFolder:FindFirstChild("Plane_888002") == p2Plane)
 	assertTest("GetPlaneForPlayer(mockPlayer1) returns nil", AircraftService.GetPlaneForPlayer(mockPlayer1) == nil)
 	assertTest("GetPlaneForPlayer(mockPlayer2) returns p2Plane", AircraftService.GetPlaneForPlayer(mockPlayer2) == p2Plane)
 
-	-- Test 11: Player 2 leaves, leaving ActivePlanes with zero orphaned test models
+	-- Test 15: Player 2 leaves, leaving ActivePlanes with zero orphaned test models
 	AircraftService.DespawnPlaneForPlayer(mockPlayer2)
 	assertTest("Player 2 plane is removed from ActivePlanes on leave", activePlanesFolder:FindFirstChild("Plane_888002") == nil)
-	assertTest("Player 2 plane reference is destroyed", p2Plane.Parent == nil)
+	assertTest("Player 2 plane reference is destroyed", p2Plane ~= nil and p2Plane.Parent == nil)
 	assertTest("GetPlaneForPlayer(mockPlayer2) returns nil", AircraftService.GetPlaneForPlayer(mockPlayer2) == nil)
 
 	return {

@@ -133,8 +133,8 @@ local STATE_DETAILS_ALLOWED_KEYS: { [string]: { [string]: boolean } } = {
 -- Deep validation of details table per game state
 local function validateStateDetails(state: string, details: any): (boolean, string?)
 	if details == nil then
-		-- Details is optional for Lobby, but required for structured active states
-		if state == "WaveActive" or state == "BossPhase" or state == "MissionSuccess" or state == "MissionFailed" then
+		-- Details is optional only for Lobby; required for all structured match states
+		if state ~= "Lobby" then
 			return false, string.format("Details table is required for state '%s'.", state)
 		end
 		return true, nil

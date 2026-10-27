@@ -246,27 +246,39 @@ function ContractTests.RunTests(): { total: number, passed: number, failed: numb
 	local ok20 = RemoteContracts.ValidateGameStateChanged(missingDetailsState)
 	assertTest("GameStateChanged WaveActive missing required details table is rejected", ok20 == false)
 
-	-- 21. Malformed GameStateChanged: Invalid state enum
+	-- 21. Malformed GameStateChanged: Intermission missing required details table
+	local missingIntermissionDetails = {
+		contractVersion = GameConfig.CONTRACT_VERSION,
+		serverTimestamp = 102.0,
+		state = "Intermission",
+	}
+	local ok21 = RemoteContracts.ValidateGameStateChanged(missingIntermissionDetails)
+	assertTest("GameStateChanged Intermission missing required details table is rejected", ok21 == false)
+
+	-- 22. Malformed GameStateChanged: Invalid state enum
 	local invalidState = {
 		contractVersion = GameConfig.CONTRACT_VERSION,
 		serverTimestamp = 102.0,
 		state = "AdminNukeAllEnemies",
 	}
-	local ok21 = RemoteContracts.ValidateGameStateChanged(invalidState)
-	assertTest("GameStateChanged with unknown state is rejected", ok21 == false)
+	local ok22 = RemoteContracts.ValidateGameStateChanged(invalidState)
+	assertTest("GameStateChanged with unknown state is rejected", ok22 == false)
 
-	-- 22 & 23. RateLimiter Server-Side Unit Tests (Fail-Closed & Exhaustion)
+	-- 23 & 24. RateLimiter Server-Side Unit Tests (Fail-Closed & Exhaustion)
 	if RunService:IsServer() then
 		local ServerScriptService = game:GetService("ServerScriptService")
 		local servicesFolder = ServerScriptService:FindFirstChild("Services")
-		if servicesFolder and servicesFolder:FindFirstChild("RateLimiter") then
-			local RateLimiter = require(servicesFolder.RateLimiter :: ModuleScript)
+		assertTest("Services folder exists on server", servicesFolder ~= nil)
+		local rateLimiterMod = servicesFolder and servicesFolder:FindFirstChild("RateLimiter")
+		assertTest("RateLimiter module exists on server", rateLimiterMod ~= nil and rateLimiterMod:IsA("ModuleScript"))
+		if rateLimiterMod and rateLimiterMod:IsA("ModuleScript") then
+			local RateLimiter = require(rateLimiterMod)
 
-			-- Test 22: Fail-closed on unconfigured remote
+			-- Test 23: Fail-closed on unconfigured remote
 			local unconfOk = RateLimiter.CheckRateLimit("TestPlayer_Unit1", "UnconfiguredHackedRemote")
 			assertTest("RateLimiter rejects unconfigured remote under fail-closed policy", unconfOk == false)
 
-			-- Test 23: Rate limit exhaustion blocks requests
+			-- Test 24: Rate limit exhaustion blocks requests
 			RateLimiter._ResetPlayer("TestPlayer_Unit2")
 			local rule = GameConfig.NetworkRateLimits.FireWeapon
 			local maxCapacity = rule.maxPerSecond + rule.burstAllowance
