@@ -13,9 +13,11 @@
 ]]
 
 local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local SharedFolder = ReplicatedStorage:WaitForChild("Shared")
+local GameConfig = require(SharedFolder:WaitForChild("GameConfig"))
 local EnemyConfig = require(SharedFolder:WaitForChild("EnemyConfig"))
 if (EnemyConfig :: any).Archetypes == nil then
 	EnemyConfig = require(SharedFolder:WaitForChild("EnemyConfig"):Clone())
@@ -32,6 +34,7 @@ export type ActiveEnemy = {
 	maxHealth: number,
 	scoreValue: number,
 	spawnTime: number,
+	spawnPosition: Vector3,
 	isAlive: boolean,
 	definition: EnemyConfig.EnemyDefinition,
 }
@@ -42,6 +45,7 @@ local activeEnemies: { [string]: ActiveEnemy } = {}
 local isInitialized = false
 local spawnCounter = 0
 local activeFolder: Folder? = nil
+local heartbeatConnection: RBXScriptConnection? = nil
 
 -- Helper to retrieve or create the authoritative ActiveEnemies container in Workspace
 local function getActiveEnemiesFolder(): Folder
@@ -115,6 +119,7 @@ function EnemyService.SpawnEnemy(archetypeId: string, spawnPosition: Vector3): (
 		maxHealth = def.maxHealth,
 		scoreValue = def.scoreValue,
 		spawnTime = os.clock(),
+		spawnPosition = spawnPosition,
 		isAlive = true,
 		definition = def,
 	}
@@ -190,6 +195,57 @@ function EnemyService.CleanupAll(): number
 end
 
 --[[
+	Authoritative enemy motion and lifecycle simulation step.
+	Advances straight flyers and archetypes according to speed and arena constraints.
+	Despawns enemies that leave the combat region.
+]]
+function EnemyService.StepEnemySimulation(dt: number)
+	if dt <= 0 then
+		return
+	end
+
+	local arena = GameConfig.Arena
+	local cullMinX = arena.MinX - 15
+	local cullMaxX = arena.MaxX + 25
+	local cullMinY = arena.MinY - 20
+	local cullMaxY = arena.MaxY + 20
+
+	local toDespawn: { string } = {}
+
+	for id, record in pairs(activeEnemies) do
+		if not record.isAlive or not record.model.Parent or not record.primaryPart then
+			table.insert(toDespawn, id)
+			continue
+		end
+
+		local def = record.definition
+		local currentPos = record.primaryPart.Position
+
+		if def.movementType == "Straight" then
+			local newX = currentPos.X - (def.speed * dt)
+			local elapsed = os.clock() - record.spawnTime
+			local newY = record.spawnPosition.Y
+			local vSpeed = (def :: any).verticalSpeed or 0
+			if vSpeed > 0 then
+				newY = record.spawnPosition.Y + math.sin(elapsed * 2.0) * (vSpeed * 0.25)
+			end
+			local newZ = arena.PlayPlaneZ
+
+			-- Check culling boundary (crossed left edge of arena or far out of bounds)
+			if newX < cullMinX or newX > cullMaxX or newY < cullMinY or newY > cullMaxY then
+				table.insert(toDespawn, id)
+			else
+				record.model:PivotTo(CFrame.new(Vector3.new(newX, newY, newZ)))
+			end
+		end
+	end
+
+	for _, id in ipairs(toDespawn) do
+		EnemyService.DespawnEnemy(id)
+	end
+end
+
+--[[
 	Initializes EnemyService. Idempotent.
 ]]
 function EnemyService.Initialize()
@@ -199,7 +255,14 @@ function EnemyService.Initialize()
 	isInitialized = true
 
 	getActiveEnemiesFolder()
-	print("[EnemyService] Authoritative enemy lifecycle service initialized.")
+
+	if heartbeatConnection == nil then
+		heartbeatConnection = RunService.Heartbeat:Connect(function(dt)
+			EnemyService.StepEnemySimulation(dt)
+		end)
+	end
+
+	print("[EnemyService] Authoritative enemy lifecycle and simulation service initialized.")
 end
 
 --[[
@@ -210,9 +273,14 @@ function EnemyService.IsInitialized(): boolean
 end
 
 --[[
-	Cleans up all active enemies, resets spawn counter, and clears tracking.
+	Cleans up all active enemies, disconnects simulation loop, resets spawn counter, and clears tracking.
 ]]
 function EnemyService._Teardown()
+	if heartbeatConnection then
+		heartbeatConnection:Disconnect()
+		heartbeatConnection = nil
+	end
+
 	EnemyService.CleanupAll()
 	activeEnemies = {}
 	spawnCounter = 0
@@ -220,3 +288,4 @@ function EnemyService._Teardown()
 end
 
 return EnemyService
+

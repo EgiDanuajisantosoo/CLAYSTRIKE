@@ -29,6 +29,7 @@ local ProjectileSimulationTests = require(script.Parent:WaitForChild("Projectile
 local EnemyTests = require(SharedFolder:WaitForChild("EnemyTests"))
 local EnemyService = require(script.Parent:WaitForChild("EnemyService"))
 local EnemyServiceTests = require(script.Parent:WaitForChild("EnemyServiceTests"))
+local StraightFlyerTests = require(script.Parent:WaitForChild("StraightFlyerTests"))
 
 -- 1. Validate baseline structure
 local baselineSuccess, missing = Architecture.ValidateServerBaseline()
@@ -139,7 +140,18 @@ if enemyServiceSummary.failed > 0 then
 end
 print(string.format("[CLAYSTRIKE - EnemyServiceTests] %d/%d enemy service tests PASSED.", enemyServiceSummary.passed, enemyServiceSummary.total))
 
--- 10. Initialize authoritative arena boundaries
+-- 10. Execute Enemy Archetype A (StraightFlyer) movement simulation tests
+local straightFlyerSummary = StraightFlyerTests.RunTests(EnemyService)
+if straightFlyerSummary.failed > 0 then
+	error(string.format(
+		"[CLAYSTRIKE - ServerBootstrap] CRITICAL: %d/%d StraightFlyer simulation tests FAILED. Halting server initialization.",
+		straightFlyerSummary.failed,
+		straightFlyerSummary.total
+	))
+end
+print(string.format("[CLAYSTRIKE - StraightFlyerTests] %d/%d StraightFlyer simulation tests PASSED.", straightFlyerSummary.passed, straightFlyerSummary.total))
+
+-- 11. Initialize authoritative arena boundaries
 ArenaService.Initialize()
 
 -- 11. Initialize authoritative network remotes & security boundaries
