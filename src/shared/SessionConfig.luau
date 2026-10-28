@@ -22,6 +22,9 @@ local SessionConfig = {}
 SessionConfig.MAX_TEAM_SIZE = 4
 SessionConfig.DEFAULT_LIVES = 3
 SessionConfig.RESPAWN_DELAY = 3.0 -- Seconds before a downed player can respawn
+SessionConfig.MAX_PLAYER_HEALTH = 100 -- Maximum authoritative player health
+SessionConfig.INVULNERABILITY_DURATION = 1.5 -- Seconds of invulnerability (iframes) after taking damage
+SessionConfig.RESPAWN_INVULNERABILITY = 3.0 -- Seconds of invulnerability granted on respawn
 
 SessionConfig.States = {
 	Joining = "Joining" :: PlayerLifecycleState,

@@ -191,6 +191,18 @@ function SessionService.RemovePlayer(userId: number): boolean
 end
 
 --[[
+	Authoritatively binds or updates the aircraft Model reference for a player record.
+]]
+function SessionService.SetPlayerPlane(userId: number, planeModel: Model?): boolean
+	local record = activeRecords[userId]
+	if not record then
+		return false
+	end
+	record.planeModel = planeModel
+	return true
+end
+
+--[[
 	Authoritatively sets the lifecycle state of a player.
 	Enforces state machine rules and replicates changes.
 ]]

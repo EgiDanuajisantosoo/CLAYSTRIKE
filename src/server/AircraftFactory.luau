@@ -169,6 +169,9 @@ function AircraftFactory.CreatePlaceholderPlane(
 	model:SetAttribute("AircraftType", aircraftType)
 	model:SetAttribute("Health", health)
 	model:SetAttribute("MaxHealth", maxHealth)
+	model:SetAttribute("Invulnerable", false)
+	model:SetAttribute("InvulnerableUntil", 0)
+	model:SetAttribute("State", "Active")
 
 	return model
 end

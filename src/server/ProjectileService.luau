@@ -274,13 +274,20 @@ function ProjectileService.StepSimulation(dt: number)
 			local hitNormal = rayResult.Normal
 			local hitPos = rayResult.Position
 
-			-- If enemy projectile hits player plane, apply damage to plane
+			-- If enemy projectile hits player plane, apply damage via AircraftService
 			if proj.faction == "Enemy" then
 				local planeModel = hitInstance:FindFirstAncestorOfClass("Model")
 				if planeModel and planeModel:GetAttribute("Health") ~= nil then
-					local curHp = planeModel:GetAttribute("Health") :: number
-					local newHp = math.max(0, curHp - proj.baseDamage)
-					planeModel:SetAttribute("Health", newHp)
+					local servicesFolder = if script.Parent then script.Parent else game:GetService("ServerScriptService"):FindFirstChild("Services")
+					if servicesFolder then
+						local acMod = servicesFolder:FindFirstChild("AircraftService")
+						if acMod then
+							local ok, acService = pcall(require, acMod)
+							if ok and acService and acService.ApplyDamage then
+								acService.ApplyDamage(planeModel, proj.baseDamage, "EnemyProjectile")
+							end
+						end
+					end
 				end
 			end
 
