@@ -170,10 +170,16 @@ function ProjectileService.SpawnProjectile(
 	part:SetAttribute("SpawnTime", os.clock())
 	part:SetAttribute("Lifetime", weaponDef.lifetime)
 	part:SetAttribute("DirectionX", normAim.X)
-	part:SetAttribute("DirectionY", normAim.Y)
-	part:SetAttribute("Faction", resolvedFaction)
-
 	part.Parent = container
+
+	-- Apply canonical cosmetic projectile trail
+	local vfxMod = SharedFolder:FindFirstChild("VFXConfig")
+	if vfxMod then
+		local ok, VFXConfig = pcall(require, vfxMod)
+		if ok and VFXConfig and VFXConfig.ApplyProjectileTrail then
+			VFXConfig.ApplyProjectileTrail(part, weaponDef.id, resolvedFaction)
+		end
+	end
 
 	local projData: Projectile = {
 		id = projId,
@@ -308,6 +314,15 @@ function ProjectileService.StepSimulation(dt: number)
 			end
 
 			-- Projectile consumed on hit
+			local vfxMod = SharedFolder:FindFirstChild("VFXConfig")
+			if vfxMod then
+				local ok, VFXConfig = pcall(require, vfxMod)
+				if ok and VFXConfig and VFXConfig.CreateImpactEffect then
+					local wId = (proj.instance and proj.instance:GetAttribute("WeaponId")) or "StandardPeaShooter"
+					VFXConfig.CreateImpactEffect(hitPos, hitNormal, wId)
+				end
+			end
+
 			despawnProjectile(id)
 			continue
 		end

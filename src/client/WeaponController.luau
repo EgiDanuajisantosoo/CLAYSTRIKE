@@ -54,6 +54,15 @@ local mockTextBoxFocus: boolean? = nil
 	For SpreadShot, produces a distinct 3-point fan burst.
 ]]
 local function playCosmeticMuzzleFlash(origin: Vector3, color: Color3, weaponId: string?)
+	local vfxMod = SharedFolder:FindFirstChild("VFXConfig")
+	if vfxMod then
+		local ok, VFXConfig = pcall(require, vfxMod)
+		if ok and VFXConfig and VFXConfig.CreateMuzzleFlash then
+			VFXConfig.CreateMuzzleFlash(origin, weaponId or "StandardPeaShooter", Workspace)
+			return
+		end
+	end
+
 	local isSpread = (weaponId == "SpreadShot")
 	local flashPart = Instance.new("Part")
 	flashPart.Name = "CosmeticMuzzleFlash"
