@@ -61,3 +61,6 @@ WeaponController.Initialize()
 local PlanePredictionController = require(script.Parent:WaitForChild("PlanePredictionController"))
 PlanePredictionController.Initialize()
 
+local LightingController = require(script.Parent:WaitForChild("LightingController"))
+LightingController.Initialize()
+
