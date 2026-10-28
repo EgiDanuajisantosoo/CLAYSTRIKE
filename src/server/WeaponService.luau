@@ -25,6 +25,7 @@ end
 local RemoteContracts = require(SharedFolder:WaitForChild("RemoteContracts"))
 
 local ProjectileService: any = nil
+local PowerUpService: any = nil
 
 local function getProjectileService(): any?
 	if ProjectileService then
@@ -48,6 +49,35 @@ local function getProjectileService(): any?
 			local ok, svc = pcall(require, pMod)
 			if ok and svc then
 				ProjectileService = svc
+				return svc
+			end
+		end
+	end
+	return nil
+end
+
+local function getPowerUpService(): any?
+	if PowerUpService then
+		return PowerUpService
+	end
+	if script.Parent then
+		local puMod = script.Parent:FindFirstChild("PowerUpService")
+		if puMod then
+			local ok, svc = pcall(require, puMod)
+			if ok and svc then
+				PowerUpService = svc
+				return svc
+			end
+		end
+	end
+	local sss = game:GetService("ServerScriptService")
+	local services = sss:FindFirstChild("Services")
+	if services then
+		local puMod = services:FindFirstChild("PowerUpService")
+		if puMod then
+			local ok, svc = pcall(require, puMod)
+			if ok and svc then
+				PowerUpService = svc
 				return svc
 			end
 		end
@@ -126,19 +156,30 @@ local function spawnAuthoritativeProjectile(
 	weaponDef: WeaponConfig.WeaponDefinition
 ): BasePart
 	totalServerShots += 1
+
+	local effectiveDef = weaponDef
+	local puSvc = getPowerUpService()
+	if puSvc and puSvc.GetEffectiveDamage then
+		local effDmg = puSvc.GetEffectiveDamage(player.UserId, weaponDef.baseDamage)
+		if effDmg ~= weaponDef.baseDamage then
+			effectiveDef = table.clone(weaponDef)
+			effectiveDef.baseDamage = effDmg
+		end
+	end
+
 	local projSvc = getProjectileService()
 	if projSvc then
-		return projSvc.SpawnProjectile(player.UserId, origin, aimDirection, weaponDef)
+		return projSvc.SpawnProjectile(player.UserId, origin, aimDirection, effectiveDef)
 	end
 
 	local container = getProjectilesFolder()
 
 	local proj = Instance.new("Part")
 	proj.Name = string.format("Proj_%d_%d", player.UserId, totalServerShots)
-	proj.Size = Vector3.new(weaponDef.projectileRadius * 2, weaponDef.projectileRadius * 1.5, weaponDef.projectileRadius * 1.5)
+	proj.Size = Vector3.new(effectiveDef.projectileRadius * 2, effectiveDef.projectileRadius * 1.5, effectiveDef.projectileRadius * 1.5)
 	proj.Position = origin
 	proj.Material = Enum.Material.SmoothPlastic
-	proj.Color = weaponDef.bulletColor
+	proj.Color = effectiveDef.bulletColor
 	proj.Anchored = true
 	proj.CanCollide = false
 	proj.CanTouch = false
@@ -147,10 +188,10 @@ local function spawnAuthoritativeProjectile(
 
 	-- Authoritative metadata tags
 	proj:SetAttribute("OwnerUserId", player.UserId)
-	proj:SetAttribute("BaseDamage", weaponDef.baseDamage)
-	proj:SetAttribute("ProjectileSpeed", weaponDef.projectileSpeed)
+	proj:SetAttribute("BaseDamage", effectiveDef.baseDamage)
+	proj:SetAttribute("ProjectileSpeed", effectiveDef.projectileSpeed)
 	proj:SetAttribute("SpawnTime", os.clock())
-	proj:SetAttribute("Lifetime", weaponDef.lifetime)
+	proj:SetAttribute("Lifetime", effectiveDef.lifetime)
 	proj:SetAttribute("DirectionX", aimDirection.X)
 	proj:SetAttribute("DirectionY", aimDirection.Y)
 
@@ -176,10 +217,16 @@ function WeaponService.HandleFireIntent(player: Player, weaponId: string, aimDir
 		return false, "NoActiveAircraft"
 	end
 
-	-- 2. Authoritative server cooldown enforcement
+	-- 2. Authoritative server cooldown enforcement (with active powerup buff scaling)
 	local now = os.clock()
 	local timeSinceLastFire = now - state.lastFireTime
-	if timeSinceLastFire < weaponDef.cooldown then
+	local effectiveCooldown = weaponDef.cooldown
+	local puSvc = getPowerUpService()
+	if puSvc and puSvc.GetEffectiveCooldown then
+		effectiveCooldown = puSvc.GetEffectiveCooldown(player.UserId, weaponDef.cooldown)
+	end
+
+	if timeSinceLastFire < effectiveCooldown then
 		return false, "CooldownActive"
 	end
 
