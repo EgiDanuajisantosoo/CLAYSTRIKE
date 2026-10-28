@@ -36,7 +36,7 @@ export type TestResult = {
 	error: string?,
 }
 
-function WaveManagerTests.RunTests(waveServiceModule: any?, enemyServiceModule: any?): {
+function WaveManagerTests.RunTests(waveServiceModule: any?, enemyServiceModule: any?, remoteManagerModule: any?): {
 	total: number,
 	passed: number,
 	failed: number,
@@ -55,7 +55,10 @@ function WaveManagerTests.RunTests(waveServiceModule: any?, enemyServiceModule: 
 		WaveService = require(Services:WaitForChild("WaveService"))
 	end
 
-	local RemoteManager = require(Services:WaitForChild("RemoteManager"))
+	local RemoteManager = remoteManagerModule
+	if not RemoteManager then
+		RemoteManager = require(Services:WaitForChild("RemoteManager"))
+	end
 	local originalIsInitialized = RemoteManager.IsInitialized
 	local originalBroadcast = RemoteManager.BroadcastGameState
 	RemoteManager.IsInitialized = function()

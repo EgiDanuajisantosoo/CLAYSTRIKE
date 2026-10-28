@@ -68,7 +68,41 @@ function EnemyFactory.CreateProceduralPlaceholder(def: EnemyConfig.EnemyDefiniti
 	nose.CastShadow = false
 	nose.Parent = model
 
-	-- Weld or rigid offset for non-anchored models, but in 2.5D simulation root part is PrimaryPart
+	-- 3. Turret shooter specific aimed cannon and telegraph indicator
+	if def.id == EnemyConfig.Archetypes.TurretShooter then
+		local cannon = Instance.new("Part")
+		cannon.Name = "VisualTurret"
+		cannon.Size = Vector3.new(def.collisionSize.X * 0.45, def.collisionSize.Y * 0.25, def.collisionSize.Z * 0.25)
+		cannon.Position = Vector3.new(-def.collisionSize.X * 0.55, 0, 0)
+		cannon.Material = Enum.Material.SmoothPlastic
+		cannon.Color = Color3.fromRGB(35, 35, 40)
+		cannon.Anchored = true
+		cannon.CanCollide = false
+		cannon.CanTouch = false
+		cannon.CanQuery = false
+		cannon.CastShadow = false
+		cannon.Parent = model
+
+		local muzzle = Instance.new("Attachment")
+		muzzle.Name = "MuzzleAttachment"
+		muzzle.Position = Vector3.new(-cannon.Size.X * 0.5, 0, 0)
+		muzzle.Parent = cannon
+
+		local telegraphLight = Instance.new("PointLight")
+		telegraphLight.Name = "TelegraphLight"
+		telegraphLight.Color = Color3.fromRGB(255, 60, 40)
+		telegraphLight.Range = 14
+		telegraphLight.Brightness = 0
+		telegraphLight.Enabled = false
+		telegraphLight.Parent = cannon
+
+		model:GetAttributeChangedSignal("IsTelegraphing"):Connect(function()
+			local isTele = model:GetAttribute("IsTelegraphing") == true
+			telegraphLight.Enabled = isTele
+			telegraphLight.Brightness = if isTele then 3.5 else 0
+		end)
+	end
+
 	return model
 end
 

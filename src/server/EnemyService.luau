@@ -24,6 +24,7 @@ if (EnemyConfig :: any).Archetypes == nil then
 end
 
 local EnemyFactory = require(script.Parent:WaitForChild("EnemyFactory"))
+local ProjectileService = require(script.Parent:WaitForChild("ProjectileService"))
 
 export type ActiveEnemy = {
 	id: string,
@@ -37,6 +38,9 @@ export type ActiveEnemy = {
 	spawnPosition: Vector3,
 	isAlive: boolean,
 	definition: EnemyConfig.EnemyDefinition,
+	attackCooldown: number,
+	isTelegraphing: boolean,
+	targetUserId: number?,
 }
 
 export type DefeatCallback = (record: ActiveEnemy, attackerPlayer: Player?) -> ()
@@ -111,9 +115,13 @@ function EnemyService.SpawnEnemy(archetypeId: string, spawnPosition: Vector3): (
 	model:SetAttribute("IsAlive", true)
 	model:SetAttribute("MovementType", def.movementType)
 	model:SetAttribute("Speed", def.speed)
+	model:SetAttribute("IsTelegraphing", false)
+	model:SetAttribute("TargetUserId", 0)
 
 	-- Parent into authoritative container
 	model.Parent = container
+
+	local initCooldown = if def.firingPattern and def.firingPattern.canShoot then def.firingPattern.fireRate else 0
 
 	-- 4. Register active record
 	local record: ActiveEnemy = {
@@ -128,6 +136,9 @@ function EnemyService.SpawnEnemy(archetypeId: string, spawnPosition: Vector3): (
 		spawnPosition = spawnPosition,
 		isAlive = true,
 		definition = def,
+		attackCooldown = initCooldown,
+		isTelegraphing = false,
+		targetUserId = nil,
 	}
 
 	activeEnemies[enemyId] = record
@@ -243,6 +254,96 @@ function EnemyService.StepEnemySimulation(dt: number)
 			else
 				record.model:PivotTo(CFrame.new(Vector3.new(newX, newY, newZ)))
 			end
+
+		elseif def.movementType == "DriftAndShoot" then
+			local elapsed = os.clock() - record.spawnTime
+			local anchorX = arena.MaxX - 25 -- Holds position at the right side of the arena
+
+			local newX = currentPos.X
+			if currentPos.X > anchorX then
+				newX = math.max(anchorX, currentPos.X - (def.speed * dt))
+			end
+
+			local vSpeed = (def :: any).verticalSpeed or 4
+			local newY = record.spawnPosition.Y + math.sin(elapsed * 1.5) * (vSpeed * 0.8)
+			newY = math.clamp(newY, arena.MinY + 5, arena.MaxY - 5)
+			local newZ = arena.PlayPlaneZ
+
+			-- Check culling boundary
+			if newX < cullMinX or newX > cullMaxX or newY < cullMinY or newY > cullMaxY then
+				table.insert(toDespawn, id)
+			else
+				record.model:PivotTo(CFrame.new(Vector3.new(newX, newY, newZ)))
+			end
+
+			-- Target Selection: query living player aircraft in Workspace.ActivePlanes
+			local targetPos: Vector3? = nil
+			local targetUserId: number? = nil
+			local shortestDistSq = math.huge
+			local activePlanesFolder = Workspace:FindFirstChild("ActivePlanes")
+			if activePlanesFolder then
+				for _, plane in ipairs(activePlanesFolder:GetChildren()) do
+					if plane:IsA("Model") and plane.PrimaryPart and (plane:GetAttribute("Health") == nil or (plane:GetAttribute("Health") :: number) > 0) then
+						local pPos = plane.PrimaryPart.Position
+						local dSq = (pPos.X - newX) * (pPos.X - newX) + (pPos.Y - newY) * (pPos.Y - newY)
+						if dSq < shortestDistSq then
+							shortestDistSq = dSq
+							targetPos = pPos
+							targetUserId = plane:GetAttribute("OwnerUserId") :: number?
+						end
+					end
+				end
+			end
+
+			if targetPos and targetUserId then
+				record.targetUserId = targetUserId
+				record.model:SetAttribute("TargetUserId", targetUserId)
+				record.model:SetAttribute("TelegraphTargetX", targetPos.X)
+				record.model:SetAttribute("TelegraphTargetY", targetPos.Y)
+
+				if def.firingPattern and def.firingPattern.canShoot then
+					record.attackCooldown -= dt
+
+					-- Telegraph window (0.5s before firing)
+					local TELEGRAPH_WINDOW = 0.5
+					if record.attackCooldown <= TELEGRAPH_WINDOW and not record.isTelegraphing then
+						record.isTelegraphing = true
+						record.model:SetAttribute("IsTelegraphing", true)
+					end
+
+					-- Cadence expiration: fire aimed projectile
+					if record.attackCooldown <= 0 then
+						local diff = Vector2.new(targetPos.X - newX, targetPos.Y - newY)
+						local aimDir = if diff.Magnitude > 0.001 then diff.Unit else Vector2.new(-1, 0)
+
+						local enemyWeaponDef = {
+							id = "TurretBlaster",
+							name = "Turret Blaster",
+							weaponType = "Standard",
+							baseDamage = def.firingPattern.projectileDamage,
+							fireRate = def.firingPattern.fireRate,
+							projectileSpeed = def.firingPattern.projectileSpeed,
+							projectileRadius = 0.8,
+							lifetime = 6.0,
+							cooldown = def.firingPattern.fireRate,
+							bulletColor = def.firingPattern.projectileColor,
+						}
+
+						ProjectileService.SpawnProjectile(0, Vector3.new(newX, newY, newZ), aimDir, enemyWeaponDef :: any, "Enemy")
+
+						record.attackCooldown = def.firingPattern.fireRate
+						record.isTelegraphing = false
+						record.model:SetAttribute("IsTelegraphing", false)
+					end
+				end
+			else
+				-- No active targets: hold fire and clear telegraph
+				if record.isTelegraphing then
+					record.isTelegraphing = false
+					record.model:SetAttribute("IsTelegraphing", false)
+				end
+				record.model:SetAttribute("TargetUserId", 0)
+			end
 		end
 	end
 
@@ -336,6 +437,9 @@ function EnemyService.HookProjectileHits(projectileService: any): (() -> ())?
 
 	return projectileService.RegisterHitCallback(function(hitResult: any)
 		if hitResult and hitResult.hitInstance and hitResult.hitInstance:IsA("BasePart") then
+			if hitResult.faction == "Enemy" then
+				return -- Enemy projectiles target player aircraft, not enemies
+			end
 			local model = hitResult.hitInstance:FindFirstAncestorOfClass("Model")
 			if model then
 				local enemyId = model:GetAttribute("EnemyId")
@@ -358,7 +462,7 @@ function EnemyService.Initialize()
 
 	getActiveEnemiesFolder()
 
-	if heartbeatConnection == nil then
+	if heartbeatConnection == nil and RunService:IsRunning() then
 		heartbeatConnection = RunService.Heartbeat:Connect(function(dt)
 			EnemyService.StepEnemySimulation(dt)
 		end)

@@ -41,6 +41,7 @@ export type Projectile = {
 	spawnTime: number,
 	lifetime: number,
 	elapsedTime: number,
+	faction: string,
 }
 
 export type HitResult = {
@@ -50,6 +51,7 @@ export type HitResult = {
 	hitNormal: Vector3,
 	damage: number,
 	ownerUserId: number,
+	faction: string,
 }
 
 export type HitCallback = (hit: HitResult) -> ()
@@ -136,11 +138,14 @@ function ProjectileService.SpawnProjectile(
 	ownerUserId: number,
 	origin: Vector3,
 	aimDirection: Vector2,
-	weaponDef: WeaponConfig.WeaponDefinition
+	weaponDef: WeaponConfig.WeaponDefinition,
+	faction: string?
 ): BasePart
 	local container = getProjectilesFolder()
 	local projId = nextProjectileId
 	nextProjectileId += 1
+
+	local resolvedFaction = faction or (if ownerUserId <= 0 then "Enemy" else "Player")
 
 	local normAim = if aimDirection.Magnitude > 0.001 then aimDirection.Unit else Vector2.new(1, 0)
 	local dir3D = Vector3.new(normAim.X, normAim.Y, 0)
@@ -165,6 +170,7 @@ function ProjectileService.SpawnProjectile(
 	part:SetAttribute("Lifetime", weaponDef.lifetime)
 	part:SetAttribute("DirectionX", normAim.X)
 	part:SetAttribute("DirectionY", normAim.Y)
+	part:SetAttribute("Faction", resolvedFaction)
 
 	part.Parent = container
 
@@ -180,6 +186,7 @@ function ProjectileService.SpawnProjectile(
 		spawnTime = os.clock(),
 		lifetime = weaponDef.lifetime,
 		elapsedTime = 0,
+		faction = resolvedFaction,
 	}
 
 	activeProjectiles[projId] = projData
@@ -200,24 +207,38 @@ function ProjectileService.StepSimulation(dt: number)
 
 	local arena = GameConfig.Arena
 	local enemiesFolder = getEnemiesFolder()
+	local activePlanesFolder = Workspace:FindFirstChild("ActivePlanes")
 
-	-- Set up raycast query parameters
-	local raycastParams = RaycastParams.new()
-	raycastParams.IgnoreWater = true
+	-- Raycast params for Player projectiles (hitting enemies)
+	local playerRaycastParams = RaycastParams.new()
+	playerRaycastParams.IgnoreWater = true
 
 	if enemiesFolder and #enemiesFolder:GetChildren() > 0 then
-		-- Preferred path: only test against enemies container
-		raycastParams.FilterType = Enum.RaycastFilterType.Include
-		raycastParams.FilterDescendantsInstances = { enemiesFolder }
+		playerRaycastParams.FilterType = Enum.RaycastFilterType.Include
+		playerRaycastParams.FilterDescendantsInstances = { enemiesFolder }
 	else
-		-- Fallback: Exclude projectiles and player aircraft
-		raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+		playerRaycastParams.FilterType = Enum.RaycastFilterType.Exclude
 		local exclusions: { Instance } = { getProjectilesFolder() }
-		local activePlanes = Workspace:FindFirstChild("ActivePlanes")
-		if activePlanes then
-			table.insert(exclusions, activePlanes)
+		if activePlanesFolder then
+			table.insert(exclusions, activePlanesFolder)
 		end
-		raycastParams.FilterDescendantsInstances = exclusions
+		playerRaycastParams.FilterDescendantsInstances = exclusions
+	end
+
+	-- Raycast params for Enemy projectiles (hitting player planes)
+	local enemyRaycastParams = RaycastParams.new()
+	enemyRaycastParams.IgnoreWater = true
+
+	if activePlanesFolder and #activePlanesFolder:GetChildren() > 0 then
+		enemyRaycastParams.FilterType = Enum.RaycastFilterType.Include
+		enemyRaycastParams.FilterDescendantsInstances = { activePlanesFolder }
+	else
+		enemyRaycastParams.FilterType = Enum.RaycastFilterType.Exclude
+		local exclusions: { Instance } = { getProjectilesFolder() }
+		if enemiesFolder then
+			table.insert(exclusions, enemiesFolder)
+		end
+		enemyRaycastParams.FilterDescendantsInstances = exclusions
 	end
 
 	-- Collect keys so modification during iteration is safe
@@ -245,12 +266,23 @@ function ProjectileService.StepSimulation(dt: number)
 		local stepVector = proj.direction * stepDistance
 		local targetPos = proj.position + stepVector
 
-		-- 3. Anti-tunneling swept raycast
-		local rayResult = Workspace:Raycast(proj.position, stepVector, raycastParams)
+		-- 3. Anti-tunneling swept raycast with faction filtering
+		local queryParams = if proj.faction == "Enemy" then enemyRaycastParams else playerRaycastParams
+		local rayResult = Workspace:Raycast(proj.position, stepVector, queryParams)
 		if rayResult and rayResult.Instance then
 			local hitInstance = rayResult.Instance
 			local hitNormal = rayResult.Normal
 			local hitPos = rayResult.Position
+
+			-- If enemy projectile hits player plane, apply damage to plane
+			if proj.faction == "Enemy" then
+				local planeModel = hitInstance:FindFirstAncestorOfClass("Model")
+				if planeModel and planeModel:GetAttribute("Health") ~= nil then
+					local curHp = planeModel:GetAttribute("Health") :: number
+					local newHp = math.max(0, curHp - proj.baseDamage)
+					planeModel:SetAttribute("Health", newHp)
+				end
+			end
 
 			-- Notify hit observers
 			local hitPayload: HitResult = {
@@ -260,6 +292,7 @@ function ProjectileService.StepSimulation(dt: number)
 				hitNormal = hitNormal,
 				damage = proj.baseDamage,
 				ownerUserId = proj.ownerUserId,
+				faction = proj.faction,
 			}
 
 			for _, cb in ipairs(hitCallbacks) do
@@ -292,8 +325,14 @@ end
 --[[
 	Registers a callback invoked whenever an authoritative projectile hits a target.
 ]]
-function ProjectileService.RegisterHitCallback(callback: HitCallback)
+function ProjectileService.RegisterHitCallback(callback: HitCallback): () -> ()
 	table.insert(hitCallbacks, callback)
+	return function()
+		local idx = table.find(hitCallbacks, callback)
+		if idx then
+			table.remove(hitCallbacks, idx)
+		end
+	end
 end
 
 --[[
@@ -338,9 +377,11 @@ function ProjectileService.Initialize()
 
 	getProjectilesFolder()
 
-	heartbeatConn = RunService.Heartbeat:Connect(function(dt: number)
-		ProjectileService.StepSimulation(dt)
-	end)
+	if RunService:IsRunning() then
+		heartbeatConn = RunService.Heartbeat:Connect(function(dt: number)
+			ProjectileService.StepSimulation(dt)
+		end)
+	end
 
 	print("[ProjectileService] Server projectile simulation service initialized.")
 end

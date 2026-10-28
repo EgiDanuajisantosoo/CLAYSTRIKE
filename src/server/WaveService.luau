@@ -313,7 +313,7 @@ function WaveService.Initialize()
 	end
 	isInitialized = true
 
-	if heartbeatConnection == nil then
+	if heartbeatConnection == nil and RunService:IsRunning() then
 		heartbeatConnection = RunService.Heartbeat:Connect(function(dt)
 			WaveService.Step(dt)
 		end)
