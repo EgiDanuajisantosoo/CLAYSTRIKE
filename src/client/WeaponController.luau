@@ -51,11 +51,13 @@ local mockTextBoxFocus: boolean? = nil
 --[[
 	Renders a local cosmetic muzzle flash effect at the aircraft's muzzle.
 	Strictly non-authoritative presentation adhering to StyleGuide VFX constraints (duration <= 0.08s).
+	For SpreadShot, produces a distinct 3-point fan burst.
 ]]
-local function playCosmeticMuzzleFlash(origin: Vector3, color: Color3)
+local function playCosmeticMuzzleFlash(origin: Vector3, color: Color3, weaponId: string?)
+	local isSpread = (weaponId == "SpreadShot")
 	local flashPart = Instance.new("Part")
 	flashPart.Name = "CosmeticMuzzleFlash"
-	flashPart.Size = Vector3.new(0.8, 0.8, 0.8)
+	flashPart.Size = if isSpread then Vector3.new(1.2, 1.2, 1.2) else Vector3.new(0.8, 0.8, 0.8)
 	flashPart.Position = origin
 	flashPart.Shape = Enum.PartType.Ball
 	flashPart.Material = Enum.Material.Neon
@@ -68,16 +70,45 @@ local function playCosmeticMuzzleFlash(origin: Vector3, color: Color3)
 	flashPart.Parent = Workspace
 
 	local light = Instance.new("PointLight")
-	light.Range = 8
-	light.Brightness = 2.5
+	light.Range = if isSpread then 12 else 8
+	light.Brightness = if isSpread then 3.2 else 2.5
 	light.Color = color
 	light.Shadows = false
 	light.Parent = flashPart
+
+	-- For spread shot, spawn two smaller flanking spark bursts at +/- 15 degrees
+	local sideSparks: { Part } = {}
+	if isSpread then
+		for _, angleDeg in ipairs({ -15, 15 }) do
+			local rad = math.rad(angleDeg)
+			local spark = Instance.new("Part")
+			spark.Name = "SpreadCosmeticSpark"
+			spark.Size = Vector3.new(0.4, 0.4, 0.4)
+			spark.Shape = Enum.PartType.Ball
+			spark.Material = Enum.Material.Neon
+			spark.Color = color
+			spark.Anchored = true
+			spark.CanCollide = false
+			spark.CanTouch = false
+			spark.CanQuery = false
+			spark.CastShadow = false
+
+			local offset = Vector3.new(math.cos(rad) * 0.8, math.sin(rad) * 0.8, 0)
+			spark.Position = origin + offset
+			spark.Parent = Workspace
+			table.insert(sideSparks, spark)
+		end
+	end
 
 	-- Fast fade out within StyleGuide limit (0.06s)
 	task.delay(0.06, function()
 		if flashPart.Parent then
 			flashPart:Destroy()
+		end
+		for _, spark in ipairs(sideSparks) do
+			if spark.Parent then
+				spark:Destroy()
+			end
 		end
 	end)
 end
@@ -184,6 +215,12 @@ function WeaponController.Initialize()
 		end
 		if isFireInput(input) then
 			isFireHeld = true
+		elseif input.KeyCode == Enum.KeyCode.One then
+			WeaponController.SetActiveWeapon("StandardPeaShooter")
+		elseif input.KeyCode == Enum.KeyCode.Two then
+			WeaponController.SetActiveWeapon("SpreadShot")
+		elseif input.KeyCode == Enum.KeyCode.Q or input.KeyCode == Enum.KeyCode.E then
+			WeaponController.CycleWeapon()
 		end
 	end)
 	table.insert(connections, inputBeganConn)
@@ -220,7 +257,7 @@ function WeaponController.Initialize()
 		if type(data) == "table" and data.origin then
 			serverConfirmCount += 1
 			local weaponDef = WeaponConfig.GetWeapon(data.weaponId or activeWeaponId) or WeaponConfig.GetDefaultWeapon()
-			playCosmeticMuzzleFlash(data.origin, weaponDef.bulletColor)
+			playCosmeticMuzzleFlash(data.origin, weaponDef.bulletColor, weaponDef.id)
 		end
 	end)
 	table.insert(connections, remoteConn)
@@ -266,6 +303,19 @@ function WeaponController.SetActiveWeapon(weaponId: string)
 	if WeaponConfig.GetWeapon(weaponId) then
 		activeWeaponId = weaponId
 	end
+end
+
+--[[
+	Cycles between available player weapons (StandardPeaShooter <-> SpreadShot).
+	Returns the newly activated weapon ID.
+]]
+function WeaponController.CycleWeapon(): string
+	if activeWeaponId == "StandardPeaShooter" then
+		activeWeaponId = "SpreadShot"
+	else
+		activeWeaponId = "StandardPeaShooter"
+	end
+	return activeWeaponId
 end
 
 --[[
