@@ -99,8 +99,23 @@ function EnemyFactory.CreateProceduralPlaceholder(def: EnemyConfig.EnemyDefiniti
 		model:GetAttributeChangedSignal("IsTelegraphing"):Connect(function()
 			local isTele = model:GetAttribute("IsTelegraphing") == true
 			telegraphLight.Enabled = isTele
-			telegraphLight.Brightness = if isTele then 3.5 else 0
 		end)
+	end
+
+	-- 4. Pursuer specific interceptor wings
+	if def.id == EnemyConfig.Archetypes.Pursuer then
+		local wings = Instance.new("Part")
+		wings.Name = "VisualWings"
+		wings.Size = Vector3.new(def.collisionSize.X * 0.5, def.collisionSize.Y * 0.15, def.collisionSize.Z * 1.8)
+		wings.Position = Vector3.new(0, 0, 0)
+		wings.Material = Enum.Material.SmoothPlastic
+		wings.Color = Color3.fromRGB(155, 55, 35)
+		wings.Anchored = true
+		wings.CanCollide = false
+		wings.CanTouch = false
+		wings.CanQuery = false
+		wings.CastShadow = false
+		wings.Parent = model
 	end
 
 	return model

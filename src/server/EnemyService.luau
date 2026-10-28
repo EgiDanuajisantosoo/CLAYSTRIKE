@@ -41,6 +41,7 @@ export type ActiveEnemy = {
 	attackCooldown: number,
 	isTelegraphing: boolean,
 	targetUserId: number?,
+	heading: Vector2?,
 }
 
 export type DefeatCallback = (record: ActiveEnemy, attackerPlayer: Player?) -> ()
@@ -139,6 +140,7 @@ function EnemyService.SpawnEnemy(archetypeId: string, spawnPosition: Vector3): (
 		attackCooldown = initCooldown,
 		isTelegraphing = false,
 		targetUserId = nil,
+		heading = Vector2.new(-1, 0),
 	}
 
 	activeEnemies[enemyId] = record
@@ -211,6 +213,68 @@ function EnemyService.CleanupAll(): number
 	return count
 end
 
+-- Helper to locate the nearest valid, living active player aircraft in 2.5D space
+local function findNearestLivingPlayerPlane(fromPos: Vector3): (Vector3?, number?, Model?)
+	local activePlanesFolder = Workspace:FindFirstChild("ActivePlanes")
+	if not activePlanesFolder then
+		return nil, nil, nil
+	end
+
+	local servicesFolder = if script.Parent then script.Parent else game:GetService("ServerScriptService"):FindFirstChild("Services")
+	local sessionService = nil
+	if servicesFolder then
+		local sMod = servicesFolder:FindFirstChild("SessionService")
+		if sMod then
+			pcall(function()
+				sessionService = require(sMod)
+			end)
+		end
+	end
+
+	local targetPos: Vector3? = nil
+	local targetUserId: number? = nil
+	local targetModel: Model? = nil
+	local shortestDistSq = math.huge
+
+	for _, plane in ipairs(activePlanesFolder:GetChildren()) do
+		if plane:IsA("Model") and plane.PrimaryPart and plane:IsDescendantOf(Workspace) then
+			local health = plane:GetAttribute("Health") :: number?
+			if health == nil or health > 0 then
+				local ownerId = plane:GetAttribute("OwnerUserId") :: number?
+				if not ownerId then
+					local numStr = string.match(plane.Name, "Plane_(%d+)")
+					if numStr then
+						ownerId = tonumber(numStr)
+					end
+				end
+
+				local planeState = plane:GetAttribute("State") :: string?
+				local isPlayerValid = (planeState == nil or planeState == "Active")
+
+				if isPlayerValid and sessionService and ownerId and sessionService.IsInitialized and sessionService.IsInitialized() then
+					local pState = sessionService.GetPlayerState(ownerId)
+					if pState and pState ~= "Active" then
+						isPlayerValid = false
+					end
+				end
+
+				if isPlayerValid then
+					local pPos = plane.PrimaryPart.Position
+					local dSq = (pPos.X - fromPos.X) * (pPos.X - fromPos.X) + (pPos.Y - fromPos.Y) * (pPos.Y - fromPos.Y)
+					if dSq < shortestDistSq then
+						shortestDistSq = dSq
+						targetPos = pPos
+						targetUserId = ownerId
+						targetModel = plane
+					end
+				end
+			end
+		end
+	end
+
+	return targetPos, targetUserId, targetModel
+end
+
 --[[
 	Authoritative enemy motion and lifecycle simulation step.
 	Advances straight flyers and archetypes according to speed and arena constraints.
@@ -255,6 +319,61 @@ function EnemyService.StepEnemySimulation(dt: number)
 				record.model:PivotTo(CFrame.new(Vector3.new(newX, newY, newZ)))
 			end
 
+		elseif def.movementType == "Pursuit" then
+			-- Query living active player target
+			local targetPos, targetUserId = findNearestLivingPlayerPlane(currentPos)
+			record.targetUserId = targetUserId
+			record.model:SetAttribute("TargetUserId", targetUserId or 0)
+
+			local currentHeading = record.heading or Vector2.new(-1, 0)
+			local desiredDir = currentHeading
+
+			if targetPos then
+				local toTarget = Vector2.new(targetPos.X - currentPos.X, targetPos.Y - currentPos.Y)
+				if toTarget.Magnitude > 0.05 then
+					desiredDir = toTarget.Unit
+				end
+			end
+
+			-- Bounded turn rate (80 degrees / ~1.4 rad per sec)
+			local MAX_TURN_RATE = math.rad(80)
+			local currentAngle = math.atan2(currentHeading.Y, currentHeading.X)
+			local desiredAngle = math.atan2(desiredDir.Y, desiredDir.X)
+
+			local angleDiff = (desiredAngle - currentAngle)
+			angleDiff = (angleDiff + math.pi) % (2 * math.pi) - math.pi
+
+			local maxTurnThisStep = MAX_TURN_RATE * dt
+			local clampedTurn = math.clamp(angleDiff, -maxTurnThisStep, maxTurnThisStep)
+			local newAngle = currentAngle + clampedTurn
+			local newHeading = Vector2.new(math.cos(newAngle), math.sin(newAngle))
+			record.heading = newHeading
+
+			local speed = def.speed
+			local stepVelX = newHeading.X * speed
+			local stepVelY = newHeading.Y * speed
+
+			local maxV = (def :: any).verticalSpeed or 10
+			stepVelY = math.clamp(stepVelY, -maxV, maxV)
+
+			local newX = currentPos.X + (stepVelX * dt)
+			local newY = currentPos.Y + (stepVelY * dt)
+			local newZ = arena.PlayPlaneZ -- Strict 2.5D constraint!
+
+			-- Check culling boundary
+			if newX < cullMinX or newX > cullMaxX or newY < cullMinY or newY > cullMaxY then
+				table.insert(toDespawn, id)
+			else
+				-- Tilt model slightly along flight path (forward in 2.5D is -X)
+				local pitch = newAngle - math.pi
+				pitch = (pitch + math.pi) % (2 * math.pi) - math.pi
+				pitch = math.clamp(pitch, -math.rad(45), math.rad(45))
+				record.model:PivotTo(CFrame.new(Vector3.new(newX, newY, newZ)) * CFrame.Angles(0, 0, pitch))
+			end
+
+			record.model:SetAttribute("HeadingX", newHeading.X)
+			record.model:SetAttribute("HeadingY", newHeading.Y)
+
 		elseif def.movementType == "DriftAndShoot" then
 			local elapsed = os.clock() - record.spawnTime
 			local anchorX = arena.MaxX - 25 -- Holds position at the right side of the arena
@@ -276,24 +395,8 @@ function EnemyService.StepEnemySimulation(dt: number)
 				record.model:PivotTo(CFrame.new(Vector3.new(newX, newY, newZ)))
 			end
 
-			-- Target Selection: query living player aircraft in Workspace.ActivePlanes
-			local targetPos: Vector3? = nil
-			local targetUserId: number? = nil
-			local shortestDistSq = math.huge
-			local activePlanesFolder = Workspace:FindFirstChild("ActivePlanes")
-			if activePlanesFolder then
-				for _, plane in ipairs(activePlanesFolder:GetChildren()) do
-					if plane:IsA("Model") and plane.PrimaryPart and (plane:GetAttribute("Health") == nil or (plane:GetAttribute("Health") :: number) > 0) then
-						local pPos = plane.PrimaryPart.Position
-						local dSq = (pPos.X - newX) * (pPos.X - newX) + (pPos.Y - newY) * (pPos.Y - newY)
-						if dSq < shortestDistSq then
-							shortestDistSq = dSq
-							targetPos = pPos
-							targetUserId = plane:GetAttribute("OwnerUserId") :: number?
-						end
-					end
-				end
-			end
+			-- Target Selection: query living player aircraft via unified helper
+			local targetPos, targetUserId = findNearestLivingPlayerPlane(Vector3.new(newX, newY, newZ))
 
 			if targetPos and targetUserId then
 				record.targetUserId = targetUserId

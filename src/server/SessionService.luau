@@ -114,13 +114,17 @@ function SessionService.AddPlayer(player: Player): (boolean, string?)
 	-- 2. Spawn player plane
 	local plane = AircraftService.SpawnPlaneForPlayer(player)
 	record.planeModel = plane
+	if plane then
+		plane:SetAttribute("OwnerUserId", userId)
+		plane:SetAttribute("State", "Active")
+	end
 
 	-- 3. Transition to Active state
 	record.state = "Active"
 	syncPlayerReplication(record)
 
-	-- 4. If mission is idle, start default mission
-	if WaveService.GetState() == "Idle" then
+	-- 4. If mission is idle, start default mission (only during active gameplay session)
+	if RunService:IsRunning() and WaveService.GetState() == "Idle" then
 		WaveService.StartMission(nil)
 	end
 
@@ -214,6 +218,9 @@ function SessionService.SetPlayerState(userId: number, newState: SessionConfig.P
 	end
 
 	record.state = newState
+	if record.planeModel and record.planeModel.Parent then
+		record.planeModel:SetAttribute("State", newState)
+	end
 	syncPlayerReplication(record)
 
 	for _, cb in ipairs(stateChangeCallbacks) do

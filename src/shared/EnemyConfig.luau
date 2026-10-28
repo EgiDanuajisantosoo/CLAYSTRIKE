@@ -208,6 +208,7 @@ end
 function EnemyConfig.GetEnemy(id: string): EnemyDefinition?
 	return ENEMY_DEFINITIONS[id]
 end
+EnemyConfig.GetDefinition = EnemyConfig.GetEnemy
 
 --[[
 	Returns all registered enemy definitions as a table copy.
