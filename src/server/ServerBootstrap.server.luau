@@ -17,6 +17,7 @@ local Architecture = require(SharedFolder:WaitForChild("Architecture"))
 local ContractTests = require(SharedFolder:WaitForChild("ContractTests"))
 local RemoteManager = require(script.Parent:WaitForChild("RemoteManager"))
 local AircraftTests = require(script.Parent:WaitForChild("AircraftTests"))
+local PlayerAircraftTests = require(script.Parent:WaitForChild("PlayerAircraftTests"))
 local AircraftService = require(script.Parent:WaitForChild("AircraftService"))
 local MovementTests = require(script.Parent:WaitForChild("MovementTests"))
 local MovementService = require(script.Parent:WaitForChild("MovementService"))
@@ -66,6 +67,16 @@ if aircraftSummary.failed > 0 then
 	))
 end
 print(string.format("[CLAYSTRIKE - AircraftTests] %d/%d aircraft factory tests PASSED.", aircraftSummary.passed, aircraftSummary.total))
+
+local playerAircraftSummary = PlayerAircraftTests.RunTests()
+if playerAircraftSummary.failed > 0 then
+	error(string.format(
+		"[CLAYSTRIKE - ServerBootstrap] CRITICAL: %d/%d player aircraft model tests FAILED. Halting server initialization.",
+		playerAircraftSummary.failed,
+		playerAircraftSummary.total
+	))
+end
+print(string.format("[CLAYSTRIKE - PlayerAircraftTests] %d/%d player aircraft model tests PASSED.", playerAircraftSummary.passed, playerAircraftSummary.total))
 
 -- 4. Execute movement service unit tests
 local movementSummary = MovementTests.RunTests()

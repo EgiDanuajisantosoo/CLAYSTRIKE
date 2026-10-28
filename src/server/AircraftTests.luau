@@ -72,11 +72,11 @@ function AircraftTests.RunTests(): { total: number, passed: number, failed: numb
 		assertTest("Aircraft is oriented facing positive X (forward in 2.5D arena)", facingPositiveX)
 	end
 
-	-- Test 3: Essential structural parts exist
-	local wings = plane:FindFirstChild("Wings")
+	-- Test 3: Essential structural parts exist (supports both placeholder and ClayFalcon production parts)
+	local wings = plane:FindFirstChild("Wings") or plane:FindFirstChild("MainWings")
 	local tailFin = plane:FindFirstChild("TailFin")
-	local tailWing = plane:FindFirstChild("TailWing")
-	local cockpit = plane:FindFirstChild("Cockpit")
+	local tailWing = plane:FindFirstChild("TailWing") or plane:FindFirstChild("TailStabilizer")
+	local cockpit = plane:FindFirstChild("Cockpit") or plane:FindFirstChild("CockpitCanopy")
 	assertTest("Aircraft includes Wings part", wings ~= nil and wings:IsA("BasePart"))
 	assertTest("Aircraft includes TailFin part", tailFin ~= nil and tailFin:IsA("BasePart"))
 	assertTest("Aircraft includes TailWing part", tailWing ~= nil and tailWing:IsA("BasePart"))
@@ -130,7 +130,8 @@ function AircraftTests.RunTests(): { total: number, passed: number, failed: numb
 
 	-- Test 7: Attributes are properly set
 	assertTest("Model has OwnerUserId attribute matching UserId", plane:GetAttribute("OwnerUserId") == testUserId)
-	assertTest("Model has AircraftType attribute", plane:GetAttribute("AircraftType") == "StandardFighter")
+	local acType = plane:GetAttribute("AircraftType")
+	assertTest("Model has AircraftType attribute", acType == "StandardFighter" or acType == "ClayFalcon")
 	assertTest("Model has Health attribute equal to 100", plane:GetAttribute("Health") == 100)
 	assertTest("Model has MaxHealth attribute equal to 100", plane:GetAttribute("MaxHealth") == 100)
 
