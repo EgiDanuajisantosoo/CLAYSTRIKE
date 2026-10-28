@@ -58,3 +58,6 @@ BackgroundController.Initialize()
 local WeaponController = require(script.Parent:WaitForChild("WeaponController"))
 WeaponController.Initialize()
 
+local PlanePredictionController = require(script.Parent:WaitForChild("PlanePredictionController"))
+PlanePredictionController.Initialize()
+
