@@ -468,7 +468,8 @@ function EnemyService.Initialize()
 		end)
 	end
 
-	local ProjectileServiceModule = script.Parent:FindFirstChild("ProjectileService")
+	local servicesFolder = if script.Parent then script.Parent else game:GetService("ServerScriptService"):FindFirstChild("Services")
+	local ProjectileServiceModule = if servicesFolder then servicesFolder:FindFirstChild("ProjectileService") else nil
 	if ProjectileServiceModule and hitHookCleanup == nil then
 		local pService = require(ProjectileServiceModule)
 		hitHookCleanup = EnemyService.HookProjectileHits(pService)
