@@ -81,9 +81,15 @@ end
 
 --[[
 	Spawns an authoritative enemy of the specified archetype at spawnPosition.
+	Optionally accepts healthOverride and scoreOverride for co-op difficulty scaling.
 	Returns (model, errorMessage).
 ]]
-function EnemyService.SpawnEnemy(archetypeId: string, spawnPosition: Vector3): (Model?, string?)
+function EnemyService.SpawnEnemy(
+	archetypeId: string,
+	spawnPosition: Vector3,
+	healthOverride: number?,
+	scoreOverride: number?
+): (Model?, string?)
 	local def = EnemyConfig.GetEnemy(archetypeId)
 	if not def then
 		return nil, string.format("Unknown archetype ID: '%s'", tostring(archetypeId))
@@ -92,6 +98,9 @@ function EnemyService.SpawnEnemy(archetypeId: string, spawnPosition: Vector3): (
 	local container = getActiveEnemiesFolder()
 	spawnCounter += 1
 	local enemyId = string.format("Enemy_%s_%d", archetypeId, spawnCounter)
+
+	local effectiveHealth = if healthOverride ~= nil and healthOverride > 0 then healthOverride else def.maxHealth
+	local effectiveScore = if scoreOverride ~= nil and scoreOverride >= 0 then scoreOverride else def.scoreValue
 
 	-- 1. Create model via EnemyFactory
 	local model = EnemyFactory.CreateEnemyModel(def)
@@ -109,9 +118,9 @@ function EnemyService.SpawnEnemy(archetypeId: string, spawnPosition: Vector3): (
 	-- 3. Set authoritative attributes
 	model:SetAttribute("EnemyId", enemyId)
 	model:SetAttribute("ArchetypeId", archetypeId)
-	model:SetAttribute("MaxHealth", def.maxHealth)
-	model:SetAttribute("CurrentHealth", def.maxHealth)
-	model:SetAttribute("ScoreValue", def.scoreValue)
+	model:SetAttribute("MaxHealth", effectiveHealth)
+	model:SetAttribute("CurrentHealth", effectiveHealth)
+	model:SetAttribute("ScoreValue", effectiveScore)
 	model:SetAttribute("SpawnTime", os.clock())
 	model:SetAttribute("IsAlive", true)
 	model:SetAttribute("MovementType", def.movementType)
@@ -130,9 +139,9 @@ function EnemyService.SpawnEnemy(archetypeId: string, spawnPosition: Vector3): (
 		archetypeId = archetypeId,
 		model = model,
 		primaryPart = primary,
-		currentHealth = def.maxHealth,
-		maxHealth = def.maxHealth,
-		scoreValue = def.scoreValue,
+		currentHealth = effectiveHealth,
+		maxHealth = effectiveHealth,
+		scoreValue = effectiveScore,
 		spawnTime = os.clock(),
 		spawnPosition = spawnPosition,
 		isAlive = true,

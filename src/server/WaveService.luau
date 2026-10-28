@@ -21,6 +21,8 @@ local WaveConfig = require(SharedFolder:WaitForChild("WaveConfig"))
 if (WaveConfig :: any).GetDefaultMission == nil then
 	WaveConfig = require(SharedFolder:WaitForChild("WaveConfig"):Clone())
 end
+local EnemyConfig = require(SharedFolder:WaitForChild("EnemyConfig"))
+local DifficultyConfig = require(SharedFolder:WaitForChild("DifficultyConfig"))
 
 local EnemyService = require(script.Parent:WaitForChild("EnemyService"))
 local RemoteManager = require(script.Parent:WaitForChild("RemoteManager"))
@@ -32,6 +34,8 @@ type QueueItem = {
 	spawnY: number,
 	dueDelay: number, -- Time in seconds remaining before this spawn triggers
 	retryCount: number, -- Retries attempted so far (0 = initial try, max 2 retries = 3 attempts total)
+	healthOverride: number?,
+	scoreOverride: number?,
 }
 
 local WaveService = {}
@@ -60,8 +64,28 @@ local function broadcastState(stateName: string, details: { [string]: any }?)
 	end
 end
 
+local forcedPlayerCount: number? = nil
+local waveCheckpointPlayerCount: number = 1
+local waveScaling: DifficultyConfig.ScalingFactors = DifficultyConfig.GetScaling(1)
+
+-- Helper to safely resolve SessionService
+local function getSessionService(): any?
+	local servicesFolder = if script.Parent then script.Parent else game:GetService("ServerScriptService"):FindFirstChild("Services")
+	if servicesFolder then
+		local sMod = servicesFolder:FindFirstChild("SessionService")
+		if sMod then
+			local ok, svc = pcall(require, sMod)
+			if ok then
+				return svc
+			end
+		end
+	end
+	return nil
+end
+
 --[[
 	Starts a wave at the given wave index.
+	Authoritatively samples active player count checkpoint and applies co-op difficulty scaling.
 ]]
 local function beginWave(waveIdx: number)
 	if not currentMission then
@@ -80,21 +104,43 @@ local function beginWave(waveIdx: number)
 		return
 	end
 
+	-- Sample difficulty scaling checkpoint based on active players at wave start
+	local activePlayers = 1
+	if forcedPlayerCount ~= nil then
+		activePlayers = forcedPlayerCount
+	else
+		local ss = getSessionService()
+		if ss and ss.IsInitialized and ss.IsInitialized() then
+			local count = ss.GetActivePlayerCount()
+			activePlayers = if count > 0 then count else 1
+		end
+	end
+	waveCheckpointPlayerCount = math.clamp(activePlayers, 1, 4)
+	waveScaling = DifficultyConfig.GetScaling(waveCheckpointPlayerCount)
+
 	currentWaveIndex = waveIdx
 	currentState = "Spawning"
 	activeWaveEnemyIds = {}
 	spawnQueue = {}
 
 	for _, entry in ipairs(wave.spawns) do
-		local count = if entry.count ~= nil then entry.count else 1
+		local baseCount = if entry.count ~= nil then entry.count else 1
+		local scaledCount = DifficultyConfig.CalculateSpawnCount(baseCount, waveCheckpointPlayerCount)
 		local spawnInterval = if entry.spawnInterval ~= nil then entry.spawnInterval else 0.5
-		for i = 1, count do
+
+		local def = EnemyConfig.GetEnemy(entry.archetypeId)
+		local scaledHealth = if def then DifficultyConfig.CalculateHealth(def.maxHealth, waveCheckpointPlayerCount, false) else nil
+		local scaledReward = if def then DifficultyConfig.CalculateReward(def.scoreValue, waveCheckpointPlayerCount) else nil
+
+		for i = 1, scaledCount do
 			local delay = if i == 1 then entry.delayAfterPrev else spawnInterval
 			table.insert(spawnQueue, {
 				archetypeId = entry.archetypeId,
 				spawnY = entry.spawnY,
 				dueDelay = delay,
 				retryCount = 0,
+				healthOverride = scaledHealth,
+				scoreOverride = scaledReward,
 			})
 		end
 	end
@@ -104,7 +150,8 @@ local function beginWave(waveIdx: number)
 		waveNumber = waveIdx,
 		remainingEnemies = totalEnemies,
 	})
-	print(string.format("[WaveService] Wave %d ('%s') started. Spawning %d enemies.", waveIdx, wave.waveName, totalEnemies))
+	print(string.format("[WaveService] Wave %d ('%s') started with %d-player scaling (x%.2f HP, x%.2f spawns). Total enemies: %d.",
+		waveIdx, wave.waveName, waveCheckpointPlayerCount, waveScaling.healthMult, waveScaling.spawnCountMult, totalEnemies))
 end
 
 --[[
@@ -134,7 +181,7 @@ function WaveService.Step(dt: number)
 					GameConfig.Arena.PlayPlaneZ
 				)
 
-				local model, err = EnemyService.SpawnEnemy(nextItem.archetypeId, spawnPos)
+				local model, err = EnemyService.SpawnEnemy(nextItem.archetypeId, spawnPos, nextItem.healthOverride, nextItem.scoreOverride)
 				if model then
 					-- Successfully spawned: remove from queue and track
 					table.remove(spawnQueue, 1)
@@ -269,6 +316,27 @@ end
 ]]
 function WaveService.GetState(): WaveState
 	return currentState
+end
+
+--[[
+	Returns the active player count sampled at the start of the current wave.
+]]
+function WaveService.GetWaveCheckpointPlayerCount(): number
+	return waveCheckpointPlayerCount
+end
+
+--[[
+	Returns the scaling factors applied to the current wave.
+]]
+function WaveService.GetWaveScaling(): DifficultyConfig.ScalingFactors
+	return waveScaling
+end
+
+--[[
+	Overrides the active player count for unit testing and deterministic simulation.
+]]
+function WaveService.SetForcedPlayerCount(forcedCount: number?)
+	forcedPlayerCount = forcedCount
 end
 
 --[[

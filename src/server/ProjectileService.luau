@@ -165,6 +165,7 @@ function ProjectileService.SpawnProjectile(
 	part:SetAttribute("ProjectileId", projId)
 	part:SetAttribute("OwnerUserId", ownerUserId)
 	part:SetAttribute("BaseDamage", weaponDef.baseDamage)
+	part:SetAttribute("Damage", weaponDef.baseDamage)
 	part:SetAttribute("ProjectileSpeed", weaponDef.projectileSpeed)
 	part:SetAttribute("SpawnTime", os.clock())
 	part:SetAttribute("Lifetime", weaponDef.lifetime)
