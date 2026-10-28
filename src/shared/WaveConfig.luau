@@ -35,6 +35,18 @@ export type MissionConfig = {
 
 local WaveConfig = {}
 
+WaveConfig.MAX_SPAWN_COUNT = 50
+
+-- Helper to ensure a number is strictly finite (not NaN, math.huge, or -math.huge)
+local function isFiniteNumber(n: any): boolean
+	return typeof(n) == "number" and n == n and n ~= math.huge and n ~= -math.huge
+end
+
+-- Helper to ensure a number is strictly finite and non-negative (>= 0)
+local function isFiniteNonNegative(n: any): boolean
+	return isFiniteNumber(n) and n >= 0
+end
+
 -- Canonical MVP Mission 1 Wave Definitions
 local DEFAULT_MISSION: MissionConfig = {
 	missionId = "Mission_01",
@@ -107,19 +119,22 @@ function WaveConfig.ValidateSpawnEntry(entry: SpawnEntry): (boolean, string?)
 	if EnemyConfig.GetEnemy(entry.archetypeId) == nil then
 		return false, string.format("SpawnEntry references unknown archetypeId: '%s'.", entry.archetypeId)
 	end
-	if typeof(entry.spawnY) ~= "number" or entry.spawnY ~= entry.spawnY then
+	if not isFiniteNumber(entry.spawnY) then
 		return false, "SpawnEntry requires finite spawnY number."
 	end
-	if typeof(entry.delayAfterPrev) ~= "number" or entry.delayAfterPrev < 0 or entry.delayAfterPrev ~= entry.delayAfterPrev then
+	if not isFiniteNonNegative(entry.delayAfterPrev) then
 		return false, "SpawnEntry requires finite non-negative delayAfterPrev number."
 	end
 	if entry.count ~= nil then
-		if typeof(entry.count) ~= "number" or entry.count < 0 or math.floor(entry.count) ~= entry.count or entry.count ~= entry.count then
-			return false, "SpawnEntry count must be a non-negative integer (>= 0)."
+		if not isFiniteNonNegative(entry.count) or math.floor(entry.count) ~= entry.count then
+			return false, "SpawnEntry count must be a non-negative finite integer (>= 0)."
+		end
+		if entry.count > WaveConfig.MAX_SPAWN_COUNT then
+			return false, string.format("SpawnEntry count (%d) exceeds MAX_SPAWN_COUNT (%d).", entry.count, WaveConfig.MAX_SPAWN_COUNT)
 		end
 	end
 	if entry.spawnInterval ~= nil then
-		if typeof(entry.spawnInterval) ~= "number" or entry.spawnInterval < 0 or entry.spawnInterval ~= entry.spawnInterval then
+		if not isFiniteNonNegative(entry.spawnInterval) then
 			return false, "SpawnEntry spawnInterval must be a finite non-negative number."
 		end
 	end
@@ -133,13 +148,13 @@ function WaveConfig.ValidateWave(wave: WaveDefinition): (boolean, string?)
 	if typeof(wave) ~= "table" then
 		return false, "WaveDefinition must be a table."
 	end
-	if typeof(wave.waveNumber) ~= "number" or wave.waveNumber < 1 or math.floor(wave.waveNumber) ~= wave.waveNumber then
-		return false, "WaveDefinition requires positive integer waveNumber (>= 1)."
+	if not isFiniteNonNegative(wave.waveNumber) or wave.waveNumber < 1 or math.floor(wave.waveNumber) ~= wave.waveNumber then
+		return false, "WaveDefinition requires positive finite integer waveNumber (>= 1)."
 	end
 	if typeof(wave.waveName) ~= "string" or #wave.waveName == 0 then
 		return false, "WaveDefinition requires non-empty waveName string."
 	end
-	if typeof(wave.delayBeforeWave) ~= "number" or wave.delayBeforeWave < 0 or wave.delayBeforeWave ~= wave.delayBeforeWave then
+	if not isFiniteNonNegative(wave.delayBeforeWave) then
 		return false, "WaveDefinition requires finite non-negative delayBeforeWave number."
 	end
 	if typeof(wave.spawns) ~= "table" or #wave.spawns == 0 then

@@ -148,9 +148,13 @@ function WaveService.Step(dt: number)
 						nextItem.retryCount += 1
 						nextItem.dueDelay = 0.5
 					else
-						-- Exhausted 3 attempts: fail mission
+						-- Exhausted 3 attempts: fail mission and perform deterministic cleanup
 						table.remove(spawnQueue, 1)
 						currentState = "Failed"
+						spawnQueue = {}
+						activeWaveEnemyIds = {}
+						EnemyService.CleanupAll()
+
 						local failReason = string.format("Failed to spawn '%s' after 3 attempts: %s", nextItem.archetypeId, tostring(err))
 						broadcastState("MissionFailed", {
 							waveReached = currentWaveIndex,
@@ -253,6 +257,11 @@ function WaveService.ResetMission()
 	currentMission = nil
 
 	EnemyService.CleanupAll()
+
+	-- Broadcast authoritative reset to clients using existing Lobby state contract
+	broadcastState("Lobby", {
+		countdown = 0,
+	})
 end
 
 --[[

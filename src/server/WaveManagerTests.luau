@@ -6,6 +6,7 @@
 ]]
 
 local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local SharedFolder = ReplicatedStorage:WaitForChild("Shared")
@@ -18,6 +19,14 @@ local WaveConfig = require(SharedFolder:WaitForChild("WaveConfig"))
 if (WaveConfig :: any).GetDefaultMission == nil then
 	WaveConfig = require(SharedFolder:WaitForChild("WaveConfig"):Clone())
 end
+
+local sharedGameConfig = SharedFolder:WaitForChild("GameConfig")
+local GameConfig = require(sharedGameConfig)
+if (GameConfig :: any).CONTRACT_VERSION == nil then
+	GameConfig = require(sharedGameConfig:Clone())
+end
+
+local RemoteContracts = require(SharedFolder:WaitForChild("RemoteContracts"))
 
 local WaveManagerTests = {}
 
@@ -44,6 +53,28 @@ function WaveManagerTests.RunTests(waveServiceModule: any?, enemyServiceModule: 
 	local WaveService = waveServiceModule
 	if not WaveService then
 		WaveService = require(Services:WaitForChild("WaveService"))
+	end
+
+	local RemoteManager = require(Services:WaitForChild("RemoteManager"))
+	local originalIsInitialized = RemoteManager.IsInitialized
+	local originalBroadcast = RemoteManager.BroadcastGameState
+	RemoteManager.IsInitialized = function()
+		return true
+	end
+
+	local broadcasts: { { state: string, details: any, payloadValid: boolean } } = {}
+	RemoteManager.BroadcastGameState = function(state: string, details: any)
+		local payload: RemoteContracts.GameStateChangedPayload = {
+			contractVersion = GameConfig.CONTRACT_VERSION,
+			serverTimestamp = os.clock(),
+			state = state,
+			details = details,
+		}
+		local ok, err = RemoteContracts.ValidateGameStateChanged(payload)
+		table.insert(broadcasts, { state = state, details = details, payloadValid = (ok == true and err == nil) })
+		if RunService:IsServer() then
+			pcall(originalBroadcast, state, details)
+		end
 	end
 
 	local results: { [number]: TestResult } = {}
@@ -152,6 +183,86 @@ function WaveManagerTests.RunTests(waveServiceModule: any?, enemyServiceModule: 
 	}
 	local zeroCountValid, _ = WaveConfig.ValidateSpawnEntry(validZeroCountEntry)
 	assertTest("Accept valid SpawnEntry with count = 0", zeroCountValid == true)
+
+	-- 3C. Finite number enforcement & MAX_SPAWN_COUNT bounds
+	local hugeSpawnYEntry: WaveConfig.SpawnEntry = {
+		archetypeId = EnemyConfig.Archetypes.StraightFlyer,
+		spawnY = math.huge,
+		delayAfterPrev = 0,
+	}
+	local hugeSpawnYValid, _ = WaveConfig.ValidateSpawnEntry(hugeSpawnYEntry)
+	assertTest("Reject SpawnEntry with math.huge spawnY", hugeSpawnYValid == false)
+
+	local negHugeSpawnYEntry: WaveConfig.SpawnEntry = {
+		archetypeId = EnemyConfig.Archetypes.StraightFlyer,
+		spawnY = -math.huge,
+		delayAfterPrev = 0,
+	}
+	local negHugeSpawnYValid, _ = WaveConfig.ValidateSpawnEntry(negHugeSpawnYEntry)
+	assertTest("Reject SpawnEntry with -math.huge spawnY", negHugeSpawnYValid == false)
+
+	local hugeDelayEntry: WaveConfig.SpawnEntry = {
+		archetypeId = EnemyConfig.Archetypes.StraightFlyer,
+		spawnY = 0,
+		delayAfterPrev = math.huge,
+	}
+	local hugeDelayValid, _ = WaveConfig.ValidateSpawnEntry(hugeDelayEntry)
+	assertTest("Reject SpawnEntry with math.huge delayAfterPrev", hugeDelayValid == false)
+
+	local hugeIntervalEntry: WaveConfig.SpawnEntry = {
+		archetypeId = EnemyConfig.Archetypes.StraightFlyer,
+		spawnY = 0,
+		delayAfterPrev = 0,
+		count = 2,
+		spawnInterval = math.huge,
+	}
+	local hugeIntervalValid, _ = WaveConfig.ValidateSpawnEntry(hugeIntervalEntry)
+	assertTest("Reject SpawnEntry with math.huge spawnInterval", hugeIntervalValid == false)
+
+	local hugeCountEntry: WaveConfig.SpawnEntry = {
+		archetypeId = EnemyConfig.Archetypes.StraightFlyer,
+		spawnY = 0,
+		delayAfterPrev = 0,
+		count = math.huge,
+	}
+	local hugeCountValid, _ = WaveConfig.ValidateSpawnEntry(hugeCountEntry)
+	assertTest("Reject SpawnEntry with math.huge count", hugeCountValid == false)
+
+	local exceedMaxCountEntry: WaveConfig.SpawnEntry = {
+		archetypeId = EnemyConfig.Archetypes.StraightFlyer,
+		spawnY = 0,
+		delayAfterPrev = 0,
+		count = 51,
+	}
+	local exceedMaxValid, _ = WaveConfig.ValidateSpawnEntry(exceedMaxCountEntry)
+	assertTest("Reject SpawnEntry with count exceeding MAX_SPAWN_COUNT (51 > 50)", exceedMaxValid == false)
+
+	local boundaryMaxCountEntry: WaveConfig.SpawnEntry = {
+		archetypeId = EnemyConfig.Archetypes.StraightFlyer,
+		spawnY = 0,
+		delayAfterPrev = 0,
+		count = 50,
+	}
+	local boundaryMaxValid, _ = WaveConfig.ValidateSpawnEntry(boundaryMaxCountEntry)
+	assertTest("Accept SpawnEntry with count exactly at MAX_SPAWN_COUNT (50)", boundaryMaxValid == true)
+
+	local hugeWaveDelayDef: WaveConfig.WaveDefinition = {
+		waveNumber = 1,
+		waveName = "Infinite Delay Wave",
+		delayBeforeWave = math.huge,
+		spawns = { { archetypeId = EnemyConfig.Archetypes.StraightFlyer, spawnY = 0, delayAfterPrev = 0 } },
+	}
+	local hugeWaveDelayValid, _ = WaveConfig.ValidateWave(hugeWaveDelayDef)
+	assertTest("Reject WaveDefinition with math.huge delayBeforeWave", hugeWaveDelayValid == false)
+
+	local hugeWaveNumDef: WaveConfig.WaveDefinition = {
+		waveNumber = math.huge,
+		waveName = "Infinite Wave Num",
+		delayBeforeWave = 1,
+		spawns = { { archetypeId = EnemyConfig.Archetypes.StraightFlyer, spawnY = 0, delayAfterPrev = 0 } },
+	}
+	local hugeWaveNumValid, _ = WaveConfig.ValidateWave(hugeWaveNumDef)
+	assertTest("Reject WaveDefinition with math.huge waveNumber", hugeWaveNumValid == false)
 
 	-- 4. Zero-count entry handling in active wave
 	local zeroCountMission: WaveConfig.MissionConfig = {
@@ -312,6 +423,17 @@ function WaveManagerTests.RunTests(waveServiceModule: any?, enemyServiceModule: 
 	assertTest("Failed state callback received internal state 'Failed'", observedFinalState == "Failed")
 	assertTest("Failure broadcast dispatched with failureReason", observedBroadcastState == "MissionFailed")
 
+	-- Deterministic cleanup on failure assertions
+	assertTest("Failed mission empties remaining spawn queue", WaveService.GetRemainingEnemiesInWave() == 0)
+	assertTest("Failed mission purges all active enemies via CleanupAll", EnemyService.GetActiveEnemyCount() == 0)
+	local activeEnemiesFolder = Workspace:FindFirstChild("ActiveEnemies")
+	assertTest("No orphaned enemy models remaining in ActiveEnemies container", activeEnemiesFolder == nil or #activeEnemiesFolder:GetChildren() == 0)
+
+	-- Remote broadcast validation for MissionFailed
+	local latestBroadcast = broadcasts[#broadcasts]
+	assertTest("Network broadcast for failure sent state 'MissionFailed'", latestBroadcast ~= nil and latestBroadcast.state == "MissionFailed")
+	assertTest("MissionFailed payload passes RemoteContracts deep validation", latestBroadcast ~= nil and latestBroadcast.payloadValid == true)
+
 	-- Simulation steps while Failed do NOT advance waves
 	for _ = 1, 10 do
 		WaveService.Step(0.1)
@@ -322,6 +444,10 @@ function WaveManagerTests.RunTests(waveServiceModule: any?, enemyServiceModule: 
 	enemySvcAny.SpawnEnemy = originalSpawnEnemy
 	WaveService.ResetMission()
 	assertTest("ResetMission recovers from Failed state back to Idle", WaveService.GetState() == "Idle")
+	local resetBroadcast = broadcasts[#broadcasts]
+	assertTest("ResetMission broadcasts network state 'Lobby'", resetBroadcast ~= nil and resetBroadcast.state == "Lobby")
+	assertTest("ResetMission Lobby payload has countdown = 0", resetBroadcast ~= nil and resetBroadcast.details and resetBroadcast.details.countdown == 0)
+	assertTest("ResetMission Lobby payload passes RemoteContracts deep validation", resetBroadcast ~= nil and resetBroadcast.payloadValid == true)
 
 	-- 8. Full Multi-Wave Mission Completion (Wave 1 -> Intermission -> Wave 2 -> Completed)
 	local fullTwoWaveMission: WaveConfig.MissionConfig = {
@@ -388,9 +514,15 @@ function WaveManagerTests.RunTests(waveServiceModule: any?, enemyServiceModule: 
 	assertTest("Final wave number remains 2 upon completion", WaveService.GetCurrentWaveNumber() == 2)
 	assertTest("No active enemies left upon mission completion", EnemyService.GetActiveEnemyCount() == 0)
 
+	local successBroadcast = broadcasts[#broadcasts]
+	assertTest("Mission completion dispatched MissionSuccess network broadcast", successBroadcast ~= nil and successBroadcast.state == "MissionSuccess")
+	assertTest("MissionSuccess payload passes RemoteContracts deep validation", successBroadcast ~= nil and successBroadcast.payloadValid == true)
+
 	-- 9. Clean Teardown
 	WaveService._Teardown()
 	EnemyService._Teardown()
+	RemoteManager.BroadcastGameState = originalBroadcast
+	RemoteManager.IsInitialized = originalIsInitialized
 	assertTest("WaveService uninitialized after _Teardown()", WaveService.IsInitialized() == false)
 	assertTest("EnemyService uninitialized after _Teardown()", EnemyService.IsInitialized() == false)
 
