@@ -25,11 +25,34 @@ end
 local RemoteContracts = require(SharedFolder:WaitForChild("RemoteContracts"))
 
 local ProjectileService: any = nil
-local successProj, projMod = pcall(function()
-	return require(script.Parent:WaitForChild("ProjectileService", 2))
-end)
-if successProj then
-	ProjectileService = projMod
+
+local function getProjectileService(): any?
+	if ProjectileService then
+		return ProjectileService
+	end
+	if script.Parent then
+		local pMod = script.Parent:FindFirstChild("ProjectileService")
+		if pMod then
+			local ok, svc = pcall(require, pMod)
+			if ok and svc then
+				ProjectileService = svc
+				return svc
+			end
+		end
+	end
+	local sss = game:GetService("ServerScriptService")
+	local services = sss:FindFirstChild("Services")
+	if services then
+		local pMod = services:FindFirstChild("ProjectileService")
+		if pMod then
+			local ok, svc = pcall(require, pMod)
+			if ok and svc then
+				ProjectileService = svc
+				return svc
+			end
+		end
+	end
+	return nil
 end
 
 local WeaponService = {}
@@ -85,7 +108,8 @@ local function resolvePlayerAircraft(player: Player): Model?
 	if not activePlanes then
 		return nil
 	end
-	local model = activePlanes:FindFirstChild(tostring(player.UserId))
+	local model = activePlanes:FindFirstChild(string.format("Plane_%d", player.UserId))
+		or activePlanes:FindFirstChild(tostring(player.UserId))
 	if model and model:IsA("Model") and model.PrimaryPart then
 		return model
 	end
@@ -102,8 +126,9 @@ local function spawnAuthoritativeProjectile(
 	weaponDef: WeaponConfig.WeaponDefinition
 ): BasePart
 	totalServerShots += 1
-	if ProjectileService then
-		return ProjectileService.SpawnProjectile(player.UserId, origin, aimDirection, weaponDef)
+	local projSvc = getProjectileService()
+	if projSvc then
+		return projSvc.SpawnProjectile(player.UserId, origin, aimDirection, weaponDef)
 	end
 
 	local container = getProjectilesFolder()

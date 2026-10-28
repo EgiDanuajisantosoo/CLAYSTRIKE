@@ -49,6 +49,40 @@ local bulletColorSpread = if StyleGuide
 	then StyleGuide.Colors.PlayerSpreadBullet
 	else Color3.fromRGB(80, 225, 255)
 
+--[[
+	Calculates a symmetric array of spread angles in degrees around the center aim axis (0°).
+	Guarantees perfect bilateral symmetry and determinism for any fanCount and angularSpacing.
+	Examples:
+	- count = 1 -> { 0 }
+	- count = 3, spacing = 15 -> { -15, 0, 15 }
+	- count = 4, spacing = 10 -> { -15, -5, 5, 15 }
+	- count = 5, spacing = 10 -> { -20, -10, 0, 10, 20 }
+]]
+function WeaponConfig.CalculateSpreadAngles(count: number, spacingDegrees: number): { number }
+	if count <= 1 then
+		return { 0 }
+	end
+
+	local angles: { number } = {}
+	if count % 2 == 1 then
+		-- Odd count: exactly one central shot at 0 degrees
+		local sideCount = (count - 1) / 2
+		for i = -sideCount, sideCount do
+			table.insert(angles, i * spacingDegrees)
+		end
+	else
+		-- Even count: symmetric split across center (no central 0 shot)
+		local half = count / 2
+		local halfSpacing = spacingDegrees / 2
+		for i = 1, half do
+			local offset = halfSpacing + (i - 1) * spacingDegrees
+			table.insert(angles, 1, -offset)
+			table.insert(angles, offset)
+		end
+	end
+	return angles
+end
+
 WeaponConfig.Weapons = {
 	StandardPeaShooter = {
 		id = "StandardPeaShooter",
@@ -75,7 +109,7 @@ WeaponConfig.Weapons = {
 		baseDamage = 8,
 		projectileSpeed = 110,
 		projectileRadius = 0.5,
-		spreadAngles = { -15, 0, 15 },
+		spreadAngles = WeaponConfig.CalculateSpreadAngles(3, 15),
 		lifetime = 2.5,
 		allowedOwnerStates = {
 			GameConfig.GameStates.WaveActive,

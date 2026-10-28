@@ -214,7 +214,7 @@ function ProjectileService.StepSimulation(dt: number)
 	local playerRaycastParams = RaycastParams.new()
 	playerRaycastParams.IgnoreWater = true
 
-	if enemiesFolder and #enemiesFolder:GetChildren() > 0 then
+	if enemiesFolder then
 		playerRaycastParams.FilterType = Enum.RaycastFilterType.Include
 		playerRaycastParams.FilterDescendantsInstances = { enemiesFolder }
 	else
@@ -230,7 +230,7 @@ function ProjectileService.StepSimulation(dt: number)
 	local enemyRaycastParams = RaycastParams.new()
 	enemyRaycastParams.IgnoreWater = true
 
-	if activePlanesFolder and #activePlanesFolder:GetChildren() > 0 then
+	if activePlanesFolder then
 		enemyRaycastParams.FilterType = Enum.RaycastFilterType.Include
 		enemyRaycastParams.FilterDescendantsInstances = { activePlanesFolder }
 	else
