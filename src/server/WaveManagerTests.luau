@@ -115,92 +115,284 @@ function WaveManagerTests.RunTests(waveServiceModule: any?, enemyServiceModule: 
 	local badArchValid, _ = WaveConfig.ValidateWave(badArchetypeWave)
 	assertTest("Reject wave with unknown archetypeId", badArchValid == false)
 
-	-- 4. Start mission with mini 2-wave test mission
-	local testMission: WaveConfig.MissionConfig = {
-		missionId = "Test_MiniMission",
-		missionName = "Test Mini Mission",
+	-- 3B. Count & spawnInterval schema validation
+	local badNegativeCountEntry: WaveConfig.SpawnEntry = {
+		archetypeId = EnemyConfig.Archetypes.StraightFlyer,
+		spawnY = 0,
+		delayAfterPrev = 0,
+		count = -1,
+	}
+	local negCountValid, _ = WaveConfig.ValidateSpawnEntry(badNegativeCountEntry)
+	assertTest("Reject SpawnEntry with negative count", negCountValid == false)
+
+	local badFractionalCountEntry: WaveConfig.SpawnEntry = {
+		archetypeId = EnemyConfig.Archetypes.StraightFlyer,
+		spawnY = 0,
+		delayAfterPrev = 0,
+		count = 2.5,
+	}
+	local fracCountValid, _ = WaveConfig.ValidateSpawnEntry(badFractionalCountEntry)
+	assertTest("Reject SpawnEntry with fractional count", fracCountValid == false)
+
+	local badNegativeIntervalEntry: WaveConfig.SpawnEntry = {
+		archetypeId = EnemyConfig.Archetypes.StraightFlyer,
+		spawnY = 0,
+		delayAfterPrev = 0,
+		count = 2,
+		spawnInterval = -0.5,
+	}
+	local negIntervalValid, _ = WaveConfig.ValidateSpawnEntry(badNegativeIntervalEntry)
+	assertTest("Reject SpawnEntry with negative spawnInterval", negIntervalValid == false)
+
+	local validZeroCountEntry: WaveConfig.SpawnEntry = {
+		archetypeId = EnemyConfig.Archetypes.StraightFlyer,
+		spawnY = 0,
+		delayAfterPrev = 0,
+		count = 0,
+	}
+	local zeroCountValid, _ = WaveConfig.ValidateSpawnEntry(validZeroCountEntry)
+	assertTest("Accept valid SpawnEntry with count = 0", zeroCountValid == true)
+
+	-- 4. Zero-count entry handling in active wave
+	local zeroCountMission: WaveConfig.MissionConfig = {
+		missionId = "Test_ZeroCount",
+		missionName = "Zero Count Mission",
 		waves = {
 			{
 				waveNumber = 1,
-				waveName = "Wave 1 - Two Drones",
-				delayBeforeWave = 0.5,
+				waveName = "Wave with Zero Count Entry",
+				delayBeforeWave = 0.2,
 				spawns = {
-					{ archetypeId = EnemyConfig.Archetypes.StraightFlyer, spawnY = 10, delayAfterPrev = 0.0 },
-					{ archetypeId = EnemyConfig.Archetypes.StraightFlyer, spawnY = -10, delayAfterPrev = 0.2 },
+					{ archetypeId = EnemyConfig.Archetypes.StraightFlyer, spawnY = 0, delayAfterPrev = 0.0, count = 0 },
+					{ archetypeId = EnemyConfig.Archetypes.StraightFlyer, spawnY = 10, delayAfterPrev = 0.1, count = 1 },
 				},
 			},
+		},
+	}
+	local startZeroOk, _ = WaveService.StartMission(zeroCountMission)
+	assertTest("StartMission with zero-count entry succeeds", startZeroOk == true)
+	WaveService.Step(0.25) -- Step past intermission
+	assertTest("Zero-count wave enters Spawning state", WaveService.GetState() == "Spawning")
+	assertTest("Zero-count entry skipped: queue contains only 1 spawn", WaveService.GetRemainingEnemiesInWave() == 1)
+
+	WaveService.Step(0.15) -- Spawn the 1 valid enemy
+	assertTest("Exactly 1 enemy spawned from zero-count wave", EnemyService.GetActiveEnemyCount() == 1)
+	WaveService.Step(0.01)
+	assertTest("Zero-count wave transitions to Active state", WaveService.GetState() == "Active")
+
+	EnemyService.CleanupAll()
+	WaveService.Step(0.01)
+	assertTest("Zero-count single wave completes after valid enemy resolved", WaveService.GetState() == "Completed")
+	WaveService.ResetMission()
+
+	-- 5. Enemy Despawn tracking (culling offscreen resolves wave)
+	local despawnMission: WaveConfig.MissionConfig = {
+		missionId = "Test_Despawn",
+		missionName = "Despawn Tracking Mission",
+		waves = {
 			{
-				waveNumber = 2,
-				waveName = "Wave 2 - One Drone",
-				delayBeforeWave = 0.5,
+				waveNumber = 1,
+				waveName = "Wave with 2 Enemies",
+				delayBeforeWave = 0.1,
 				spawns = {
-					{ archetypeId = EnemyConfig.Archetypes.StraightFlyer, spawnY = 0, delayAfterPrev = 0.0 },
+					{ archetypeId = EnemyConfig.Archetypes.StraightFlyer, spawnY = 10, delayAfterPrev = 0.0, count = 2, spawnInterval = 0.1 },
+				},
+			},
+		},
+	}
+	WaveService.StartMission(despawnMission)
+	WaveService.Step(0.15) -- Past intermission
+	WaveService.Step(0.01) -- First spawn
+	WaveService.Step(0.15) -- Second spawn
+	WaveService.Step(0.01) -- State to Active
+	assertTest("Despawn test spawned 2 active enemies", EnemyService.GetActiveEnemyCount() == 2)
+	assertTest("Remaining enemies in wave is 2", WaveService.GetRemainingEnemiesInWave() == 2)
+
+	local activeEnemies = EnemyService.GetAllActiveEnemies()
+	local firstEnemyId: string? = nil
+	for id, _ in pairs(activeEnemies) do
+		firstEnemyId = id
+		break
+	end
+	assertTest("Found active enemy ID to despawn", firstEnemyId ~= nil)
+	if firstEnemyId then
+		EnemyService.DespawnEnemy(firstEnemyId)
+	end
+	assertTest("DespawnEnemy removed 1 enemy from EnemyService", EnemyService.GetActiveEnemyCount() == 1)
+	assertTest("Despawned enemy decreases wave remaining count to 1", WaveService.GetRemainingEnemiesInWave() == 1)
+
+	-- Resolve second enemy
+	EnemyService.CleanupAll()
+	WaveService.Step(0.01)
+	assertTest("Wave advances/completes when remaining enemy is resolved after despawn", WaveService.GetState() == "Completed")
+	WaveService.ResetMission()
+
+	-- 6. Reset during active spawn queue (mid-queue reset)
+	local midQueueMission: WaveConfig.MissionConfig = {
+		missionId = "Test_MidQueue",
+		missionName = "Mid Queue Reset Mission",
+		waves = {
+			{
+				waveNumber = 1,
+				waveName = "Delayed Wave",
+				delayBeforeWave = 0.1,
+				spawns = {
+					{ archetypeId = EnemyConfig.Archetypes.StraightFlyer, spawnY = 0, delayAfterPrev = 0.0, count = 3, spawnInterval = 1.0 },
+				},
+			},
+		},
+	}
+	WaveService.StartMission(midQueueMission)
+	WaveService.Step(0.15) -- Past intermission
+	WaveService.Step(0.01) -- First enemy spawned, 2 pending
+	assertTest("Mid-queue test is currently in Spawning state", WaveService.GetState() == "Spawning")
+	assertTest("Mid-queue has 1 spawned and 2 pending in queue", EnemyService.GetActiveEnemyCount() == 1 and WaveService.GetRemainingEnemiesInWave() == 3)
+
+	-- Reset while queue still has pending items
+	WaveService.ResetMission()
+	assertTest("ResetMission clears state to Idle", WaveService.GetState() == "Idle")
+	assertTest("ResetMission clears current wave number to 0", WaveService.GetCurrentWaveNumber() == 0)
+	assertTest("ResetMission clears remaining enemies to 0", WaveService.GetRemainingEnemiesInWave() == 0)
+	assertTest("ResetMission purges all spawned enemy models", EnemyService.GetActiveEnemyCount() == 0)
+
+	-- 7. Spawn failure policy: retry up to 2 times, then fail mission (never false success)
+	local originalSpawnEnemy = EnemyService.SpawnEnemy
+	local spawnAttempts = 0
+	local enemySvcAny = EnemyService :: any
+	enemySvcAny.SpawnEnemy = function(arch: string, pos: Vector3)
+		spawnAttempts += 1
+		return nil, "Simulated spawn failure"
+	end
+
+	local failMission: WaveConfig.MissionConfig = {
+		missionId = "Test_FailPolicy",
+		missionName = "Failure Policy Mission",
+		waves = {
+			{
+				waveNumber = 1,
+				waveName = "Failing Wave",
+				delayBeforeWave = 0.1,
+				spawns = {
+					{ archetypeId = EnemyConfig.Archetypes.StraightFlyer, spawnY = 0, delayAfterPrev = 0.0, count = 1 },
 				},
 			},
 		},
 	}
 
-	-- Add to mock lookup or pass directly
-	local startOk, startErr = WaveService.StartMission(defaultMission.missionId)
-	assertTest("StartMission with default mission succeeds", startOk == true and startErr == nil)
-	assertTest("State transitions to Intermission before Wave 1", WaveService.GetState() == "Intermission")
+	local observedFinalState: string? = nil
+	local observedBroadcastState: string? = nil
+	local unsubscribe = WaveService.OnWaveStateChanged(function(state, waveNum, details)
+		observedFinalState = state
+		if details and details.failureReason then
+			observedBroadcastState = "MissionFailed"
+		end
+	end)
 
-	-- Step through intermission delay of wave 1 (2.0s)
-	WaveService.Step(1.0)
-	assertTest("Still in Intermission at 1.0s elapsed", WaveService.GetState() == "Intermission")
+	WaveService.StartMission(failMission)
+	WaveService.Step(0.15) -- Past intermission into Spawning
 
-	WaveService.Step(1.1) -- Total 2.1s elapsed, exceeds 2.0s delay
-	assertTest("Transitions to Spawning after intermission expires", WaveService.GetState() == "Spawning")
-	assertTest("Current wave number is 1", WaveService.GetCurrentWaveNumber() == 1)
-
-	-- 5. Spawn sequencing in Wave 1
-	-- In defaultMission wave 1:
-	-- Entry 1: delayAfterPrev = 0.0 -> spawns immediately on next step
+	-- Attempt 1 (initial): fails
 	WaveService.Step(0.01)
-	assertTest("First enemy spawned immediately", EnemyService.GetActiveEnemyCount() == 1)
+	assertTest("Attempt 1 fails and triggers retry pause", spawnAttempts == 1)
+	assertTest("State remains Spawning during retry pause", WaveService.GetState() == "Spawning")
 
-	-- Entry 2: delayAfterPrev = 1.0 -> step 0.5s -> not yet
-	WaveService.Step(0.5)
-	assertTest("Second enemy not yet spawned at 0.5s", EnemyService.GetActiveEnemyCount() == 1)
+	-- Advance 0.25s: pause is 0.5s, so no new attempt yet
+	WaveService.Step(0.25)
+	assertTest("No retry before 0.5s pause expires", spawnAttempts == 1)
 
-	-- Step another 0.6s -> total 1.1s -> second enemy spawns
-	WaveService.Step(0.6)
-	assertTest("Second enemy spawned after 1.0s interval", EnemyService.GetActiveEnemyCount() == 2)
+	-- Attempt 2 (retry 1): step another 0.3s (total 0.55s) -> fails
+	WaveService.Step(0.3)
+	assertTest("Attempt 2 (retry 1) triggers after 0.5s pause", spawnAttempts == 2)
+	assertTest("State remains Spawning on retry 1 failure", WaveService.GetState() == "Spawning")
 
-	-- Entry 3: delayAfterPrev = 1.0 -> step 1.1s -> third enemy spawns
-	WaveService.Step(1.1)
-	assertTest("Third enemy spawned after second 1.0s interval", EnemyService.GetActiveEnemyCount() == 3)
+	-- Attempt 3 (retry 2): step another 0.55s -> fails -> exhausts 3 attempts
+	WaveService.Step(0.55)
+	assertTest("Attempt 3 (retry 2) triggers after second 0.5s pause", spawnAttempts == 3)
+	assertTest("Wave transitions to Failed state after exhausting 3 attempts", WaveService.GetState() == "Failed")
+	assertTest("Failed state callback received internal state 'Failed'", observedFinalState == "Failed")
+	assertTest("Failure broadcast dispatched with failureReason", observedBroadcastState == "MissionFailed")
 
-	-- Step small dt -> queue is now empty -> transitions to Active
-	WaveService.Step(0.01)
-	assertTest("Transitions to Active state once all wave enemies are spawned", WaveService.GetState() == "Active")
-
-	-- 6. Wave cannot advance while enemies remain active
+	-- Simulation steps while Failed do NOT advance waves
 	for _ = 1, 10 do
 		WaveService.Step(0.1)
 	end
-	assertTest("Wave does not advance while enemies remain alive", WaveService.GetCurrentWaveNumber() == 1)
-	assertTest("State remains Active while enemies remain alive", WaveService.GetState() == "Active")
+	assertTest("Failed state does not falsely advance to Completed or Intermission", WaveService.GetState() == "Failed")
 
-	-- 7. Wave advances only when active enemies are resolved
-	-- Defeat all 3 active enemies
-	EnemyService.CleanupAll()
-	assertTest("Active enemies cleaned up", EnemyService.GetActiveEnemyCount() == 0)
-
-	-- Step simulation: WaveService detects remainingCount == 0 and advances to Wave 2 Intermission
-	WaveService.Step(0.01)
-	assertTest("Advances to Intermission for Wave 2 after Wave 1 is cleared", WaveService.GetState() == "Intermission")
-
-	-- 8. ResetMission clears all state, timers, and enemies immediately
+	unsubscribe()
+	enemySvcAny.SpawnEnemy = originalSpawnEnemy
 	WaveService.ResetMission()
-	assertTest("ResetMission sets state to Idle", WaveService.GetState() == "Idle")
-	assertTest("ResetMission resets current wave to 0", WaveService.GetCurrentWaveNumber() == 0)
-	assertTest("ResetMission leaves 0 active enemies", EnemyService.GetActiveEnemyCount() == 0)
+	assertTest("ResetMission recovers from Failed state back to Idle", WaveService.GetState() == "Idle")
+
+	-- 8. Full Multi-Wave Mission Completion (Wave 1 -> Intermission -> Wave 2 -> Completed)
+	local fullTwoWaveMission: WaveConfig.MissionConfig = {
+		missionId = "Test_FullMission",
+		missionName = "Full Two Wave Mission",
+		waves = {
+			{
+				waveNumber = 1,
+				waveName = "Wave 1 - Vanguard",
+				delayBeforeWave = 0.2,
+				spawns = {
+					{ archetypeId = EnemyConfig.Archetypes.StraightFlyer, spawnY = 10, delayAfterPrev = 0.0, count = 2, spawnInterval = 0.2 },
+				},
+			},
+			{
+				waveNumber = 2,
+				waveName = "Wave 2 - Rearguard",
+				delayBeforeWave = 0.3,
+				spawns = {
+					{ archetypeId = EnemyConfig.Archetypes.StraightFlyer, spawnY = -10, delayAfterPrev = 0.0, count = 1 },
+				},
+			},
+		},
+	}
+
+	local startFullOk, _ = WaveService.StartMission(fullTwoWaveMission)
+	assertTest("StartMission with fullTwoWaveMission succeeds", startFullOk == true)
+	assertTest("Mission starts in Intermission for Wave 1", WaveService.GetState() == "Intermission")
+
+	-- Intermission 1 (0.2s)
+	WaveService.Step(0.25)
+	assertTest("Wave 1 transitions to Spawning", WaveService.GetState() == "Spawning")
+	assertTest("Current wave is 1", WaveService.GetCurrentWaveNumber() == 1)
+
+	-- Spawn both enemies
+	WaveService.Step(0.01) -- First enemy
+	assertTest("Wave 1 first drone spawned", EnemyService.GetActiveEnemyCount() == 1)
+	WaveService.Step(0.25) -- Second enemy
+	assertTest("Wave 1 second drone spawned", EnemyService.GetActiveEnemyCount() == 2)
+	WaveService.Step(0.01)
+	assertTest("Wave 1 transitions to Active", WaveService.GetState() == "Active")
+
+	-- Defeat all Wave 1 enemies
+	EnemyService.CleanupAll()
+	WaveService.Step(0.01)
+	assertTest("Wave 1 cleared transitions to Intermission for Wave 2", WaveService.GetState() == "Intermission")
+	assertTest("Intermission points to Wave 2", WaveService.GetCurrentWaveNumber() == 1)
+
+	-- Intermission 2 (0.3s)
+	WaveService.Step(0.35)
+	assertTest("Wave 2 transitions to Spawning", WaveService.GetState() == "Spawning")
+	assertTest("Current wave is now 2", WaveService.GetCurrentWaveNumber() == 2)
+
+	-- Spawn Wave 2 enemy
+	WaveService.Step(0.01)
+	assertTest("Wave 2 drone spawned", EnemyService.GetActiveEnemyCount() == 1)
+	WaveService.Step(0.01)
+	assertTest("Wave 2 transitions to Active", WaveService.GetState() == "Active")
+
+	-- Defeat Wave 2 enemy
+	EnemyService.CleanupAll()
+	WaveService.Step(0.01)
+	assertTest("Entire mission transitions to Completed state upon final wave clear", WaveService.GetState() == "Completed")
+	assertTest("Final wave number remains 2 upon completion", WaveService.GetCurrentWaveNumber() == 2)
+	assertTest("No active enemies left upon mission completion", EnemyService.GetActiveEnemyCount() == 0)
 
 	-- 9. Clean Teardown
 	WaveService._Teardown()
 	EnemyService._Teardown()
 	assertTest("WaveService uninitialized after _Teardown()", WaveService.IsInitialized() == false)
+	assertTest("EnemyService uninitialized after _Teardown()", EnemyService.IsInitialized() == false)
 
 	return {
 		total = passedCount + failedCount,

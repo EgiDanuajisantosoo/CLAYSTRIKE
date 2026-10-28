@@ -25,11 +25,13 @@ end
 local EnemyService = require(script.Parent:WaitForChild("EnemyService"))
 local RemoteManager = require(script.Parent:WaitForChild("RemoteManager"))
 
-export type WaveState = "Idle" | "Intermission" | "Spawning" | "Active" | "Completed"
+export type WaveState = "Idle" | "Intermission" | "Spawning" | "Active" | "Completed" | "Failed"
 
 type QueueItem = {
-	entry: WaveConfig.SpawnEntry,
+	archetypeId: string,
+	spawnY: number,
 	dueDelay: number, -- Time in seconds remaining before this spawn triggers
+	retryCount: number, -- Retries attempted so far (0 = initial try, max 2 retries = 3 attempts total)
 }
 
 local WaveService = {}
@@ -84,13 +86,20 @@ local function beginWave(waveIdx: number)
 	spawnQueue = {}
 
 	for _, entry in ipairs(wave.spawns) do
-		table.insert(spawnQueue, {
-			entry = entry,
-			dueDelay = entry.delayAfterPrev,
-		})
+		local count = if entry.count ~= nil then entry.count else 1
+		local spawnInterval = if entry.spawnInterval ~= nil then entry.spawnInterval else 0.5
+		for i = 1, count do
+			local delay = if i == 1 then entry.delayAfterPrev else spawnInterval
+			table.insert(spawnQueue, {
+				archetypeId = entry.archetypeId,
+				spawnY = entry.spawnY,
+				dueDelay = delay,
+				retryCount = 0,
+			})
+		end
 	end
 
-	local totalEnemies = #wave.spawns
+	local totalEnemies = #spawnQueue
 	broadcastState("WaveActive", {
 		waveNumber = waveIdx,
 		remainingEnemies = totalEnemies,
@@ -103,7 +112,7 @@ end
 	Can be called directly by unit tests or via Heartbeat.
 ]]
 function WaveService.Step(dt: number)
-	if dt <= 0 then
+	if dt <= 0 or currentState == "Failed" or currentState == "Completed" or currentState == "Idle" then
 		return
 	end
 
@@ -119,21 +128,37 @@ function WaveService.Step(dt: number)
 			local nextItem = spawnQueue[1]
 			nextItem.dueDelay -= dt
 			if nextItem.dueDelay <= 0 then
-				table.remove(spawnQueue, 1)
-
-				local entry = nextItem.entry
 				local spawnPos = Vector3.new(
 					GameConfig.Arena.MaxX + 5,
-					entry.spawnY,
+					nextItem.spawnY,
 					GameConfig.Arena.PlayPlaneZ
 				)
 
-				local model, err = EnemyService.SpawnEnemy(entry.archetypeId, spawnPos)
+				local model, err = EnemyService.SpawnEnemy(nextItem.archetypeId, spawnPos)
 				if model then
+					-- Successfully spawned: remove from queue and track
+					table.remove(spawnQueue, 1)
 					local enemyId = model:GetAttribute("EnemyId") :: string
 					activeWaveEnemyIds[enemyId] = true
 				else
-					warn(string.format("[WaveService] Failed to spawn enemy archetype '%s': %s", entry.archetypeId, tostring(err)))
+					-- Failed attempt: retry up to maxRetries = 2 (3 attempts total) with 0.5s pause
+					warn(string.format("[WaveService] Failed to spawn enemy archetype '%s' (attempt %d/3): %s",
+						nextItem.archetypeId, nextItem.retryCount + 1, tostring(err)))
+					if nextItem.retryCount < 2 then
+						nextItem.retryCount += 1
+						nextItem.dueDelay = 0.5
+					else
+						-- Exhausted 3 attempts: fail mission
+						table.remove(spawnQueue, 1)
+						currentState = "Failed"
+						local failReason = string.format("Failed to spawn '%s' after 3 attempts: %s", nextItem.archetypeId, tostring(err))
+						broadcastState("MissionFailed", {
+							waveReached = currentWaveIndex,
+							failureReason = string.sub(failReason, 1, 100),
+						})
+						warn(string.format("[WaveService] Mission failed on Wave %d: %s", currentWaveIndex, failReason))
+						return
+					end
 				end
 			end
 		else
@@ -175,13 +200,21 @@ function WaveService.Step(dt: number)
 end
 
 --[[
-	Starts execution of a mission by ID (or default if nil).
+	Starts execution of a mission by ID, custom MissionConfig, or default if nil.
 	Returns (success: boolean, error: string?).
 ]]
-function WaveService.StartMission(missionId: string?): (boolean, string?)
-	local mission = if missionId then WaveConfig.GetMission(missionId) else WaveConfig.GetDefaultMission()
+function WaveService.StartMission(missionIdOrConfig: (string | WaveConfig.MissionConfig)?): (boolean, string?)
+	local mission: WaveConfig.MissionConfig? = nil
+	if typeof(missionIdOrConfig) == "table" then
+		mission = missionIdOrConfig :: WaveConfig.MissionConfig
+	elseif typeof(missionIdOrConfig) == "string" then
+		mission = WaveConfig.GetMission(missionIdOrConfig)
+	else
+		mission = WaveConfig.GetDefaultMission()
+	end
+
 	if not mission then
-		return false, string.format("Unknown mission ID: '%s'", tostring(missionId))
+		return false, string.format("Unknown mission: '%s'", tostring(missionIdOrConfig))
 	end
 
 	local valid, valErr = WaveConfig.ValidateMission(mission)

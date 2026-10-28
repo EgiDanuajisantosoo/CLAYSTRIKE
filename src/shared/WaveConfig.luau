@@ -16,6 +16,8 @@ export type SpawnEntry = {
 	archetypeId: string,
 	spawnY: number,
 	delayAfterPrev: number, -- Delay in seconds after previous spawn in this wave
+	count: number?, -- Number of enemies to spawn for this entry (default 1, allows 0)
+	spawnInterval: number?, -- Interval in seconds between successive spawns if count > 1 (default 0.5)
 }
 
 export type WaveDefinition = {
@@ -110,6 +112,16 @@ function WaveConfig.ValidateSpawnEntry(entry: SpawnEntry): (boolean, string?)
 	end
 	if typeof(entry.delayAfterPrev) ~= "number" or entry.delayAfterPrev < 0 or entry.delayAfterPrev ~= entry.delayAfterPrev then
 		return false, "SpawnEntry requires finite non-negative delayAfterPrev number."
+	end
+	if entry.count ~= nil then
+		if typeof(entry.count) ~= "number" or entry.count < 0 or math.floor(entry.count) ~= entry.count or entry.count ~= entry.count then
+			return false, "SpawnEntry count must be a non-negative integer (>= 0)."
+		end
+	end
+	if entry.spawnInterval ~= nil then
+		if typeof(entry.spawnInterval) ~= "number" or entry.spawnInterval < 0 or entry.spawnInterval ~= entry.spawnInterval then
+			return false, "SpawnEntry spawnInterval must be a finite non-negative number."
+		end
 	end
 	return true, nil
 end
