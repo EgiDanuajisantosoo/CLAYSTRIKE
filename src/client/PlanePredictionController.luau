@@ -214,10 +214,18 @@ function PlanePredictionController.Step(dt: number)
 		-- Reconcile against replicated server position
 		predictedPosition = PlanePredictionController.ReconcilePosition(nextPredictedPos, serverPos, dt)
 
-		-- Apply visual transform (+X forward facing)
+		-- Calculate subtle clay banking tilt based on vertical movement velocity (+/- 12 degrees)
+		local maxTiltRad = math.rad(12)
+		local targetTilt = math.clamp(predictedVelocity.Y / GameConfig.Movement.MaxSpeed, -1, 1) * maxTiltRad
+		local currentTilt = localPlane:GetAttribute("BankTilt") :: number? or 0
+		local nextTilt = currentTilt + (targetTilt - currentTilt) * (1 - math.exp(-12 * dt))
+		localPlane:SetAttribute("BankTilt", nextTilt)
+
+		-- Apply visual transform (+X forward facing, with banking tilt around Z flight axis)
 		local lookTarget = predictedPosition + Vector3.new(1, 0, 0)
-		local cf = CFrame.lookAt(predictedPosition, lookTarget, Vector3.new(0, 1, 0))
-		localPlane:PivotTo(cf)
+		local baseCf = CFrame.lookAt(predictedPosition, lookTarget, Vector3.new(0, 1, 0))
+		local bankedCf = baseCf * CFrame.Angles(0, 0, nextTilt)
+		localPlane:PivotTo(bankedCf)
 	else
 		isLocalPositionInitialized = false
 	end
