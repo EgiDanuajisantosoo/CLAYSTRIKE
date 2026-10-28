@@ -10,6 +10,7 @@
 	with an explicit error, preventing insecure or broken network listener startup.
 ]]
 
+local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local SharedFolder = ReplicatedStorage:WaitForChild("Shared")
 local Architecture = require(SharedFolder:WaitForChild("Architecture"))
@@ -199,6 +200,30 @@ EnemyService.Initialize()
 
 -- 20. Initialize authoritative wave progression service
 WaveService.Initialize()
+
+-- 21. Bind authoritative mission trigger: start mission once the first aircraft is created
+local missionStarted = false
+local activePlanesFolder = Workspace:WaitForChild("ActivePlanes")
+
+local function checkAndStartMission(child: Instance)
+	if not missionStarted and child:IsA("Model") and child:GetAttribute("OwnerUserId") ~= nil then
+		missionStarted = true
+		if WaveService.GetState() == "Idle" then
+			print("[CLAYSTRIKE - ServerBootstrap] First aircraft detected in ActivePlanes. Starting default mission.")
+			WaveService.StartMission()
+		end
+	end
+end
+
+activePlanesFolder.ChildAdded:Connect(checkAndStartMission)
+
+-- Handle any aircraft that already spawned prior to listener attachment
+for _, child in ipairs(activePlanesFolder:GetChildren()) do
+	checkAndStartMission(child)
+	if missionStarted then
+		break
+	end
+end
 
 
 
